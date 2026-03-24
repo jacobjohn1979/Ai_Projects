@@ -1,4 +1,22 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ENV = os.getenv("ENV", "local")
+HOST = os.getenv("HOST", "127.0.0.1")
+PORT = int(os.getenv("PORT", "8001"))
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+
+import pytesseract
+pytesseract.pytesseract.tesseract_cmd = os.getenv(
+    "TESSERACT_CMD",
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+)
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
 import re
 import uuid
 from typing import Any
