@@ -430,7 +430,8 @@ async def screen_pdf(file: UploadFile = File(...)):
     all_flags = forensic_flags + text_flags + ocr_flags + field_flags
     risk_score, risk_level = score_pdf_result(all_flags)
 
-    return JSONResponse({
+    # ✅ Build result FIRST
+    result = {
         "file_name": file.filename,
         "risk_score": risk_score,
         "risk_level": risk_level,
@@ -446,7 +447,11 @@ async def screen_pdf(file: UploadFile = File(...)):
             "used": ocr_info.get("ocr_used", False),
         },
     }
+
+    # ✅ Save to DB
     save_screening_log(result, file.filename, "pdf", "pdf")
+
+    # ✅ Return response
     return JSONResponse(result)
 
 from fastapi import File, UploadFile
@@ -474,7 +479,8 @@ async def screen_image(file: UploadFile = File(...)):
     all_flags = metadata_flags + ocr_flags + ela_flags + forensic_flags
     risk_score, risk_level = score_image_flags(all_flags)
 
-    return JSONResponse({
+    # ✅ Build result FIRST
+    result = {
         "file_name": file.filename,
         "risk_score": risk_score,
         "risk_level": risk_level,
@@ -487,7 +493,11 @@ async def screen_image(file: UploadFile = File(...)):
         "ela": ela_info,
         "image_forensics": forensic_info,
     }
+
+    # ✅ Save to DB
     save_screening_log(result, file.filename, "image", "image")
+
+    # ✅ Return response
     return JSONResponse(result)
 
 @app.get("/")
