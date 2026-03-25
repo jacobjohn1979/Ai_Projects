@@ -1,3 +1,4 @@
+from database import save_screening_log
 import os
 from dotenv import load_dotenv
 
@@ -444,8 +445,9 @@ async def screen_pdf(file: UploadFile = File(...)):
         "ocr": {
             "used": ocr_info.get("ocr_used", False),
         },
-    })
-
+    }
+    save_screening_log(result, file.filename, "pdf", "pdf")
+    return JSONResponse(result)
 
 from fastapi import File, UploadFile
 
@@ -484,8 +486,9 @@ async def screen_image(file: UploadFile = File(...)):
         },
         "ela": ela_info,
         "image_forensics": forensic_info,
-    })
-
+    }
+    save_screening_log(result, file.filename, "image", "image")
+    return JSONResponse(result)
 
 @app.get("/")
 def home():
