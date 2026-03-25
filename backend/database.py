@@ -28,7 +28,8 @@ class ScreeningLog(Base):
     status = Column(Text)
     engine_version = Column(Text)
     flags = Column(JSONB)
-    metadata = Column(JSONB)
+    metadata_json = Column("metadata", JSONB)
+    # metadata = Column(JSONB)
     ocr_summary = Column(JSONB)
     forensics = Column(JSONB)
     field_checks = Column(JSONB)
@@ -51,7 +52,7 @@ def save_screening_log(result, file_name, file_type, screening_type):
             status="completed",
             engine_version="v1",
             flags=result.get("flags", []),
-            metadata=result.get("metadata") or result.get("forensics"),
+            metadata_json=result.get("metadata") or result.get("forensics"),
             ocr_summary=result.get("ocr_summary") or result.get("ocr"),
             forensics=result.get("image_forensics") or result.get("forensics"),
             field_checks=result.get("field_checks"),
