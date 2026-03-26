@@ -39,10 +39,14 @@ COPY . .
 # ── Upload directory ──────────────────────────────────────────────────────────
 RUN mkdir -p /app/uploads
 
-# ── Non-root user for security ────────────────────────────────────────────────
-RUN useradd -m -u 1000 appuser \
- && chown -R appuser:appuser /app
-USER appuser
+# ── Non-root user — matches the server's docuser ─────────────────────────────
+# UID is passed at build time so file permissions align with the host user.
+# Build with:  docker compose build --build-arg UID=$(id -u)
+# Falls back to 1000 if not specified.
+ARG UID=1000
+RUN useradd -m -u ${UID} -s /bin/bash docuser \
+ && chown -R docuser:docuser /app
+USER docuser
 
-# ── Default command (overridden per service in docker-compose) ─────────────────
+# ── Default command (overridden per service in docker-compose) ────────────────
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]
