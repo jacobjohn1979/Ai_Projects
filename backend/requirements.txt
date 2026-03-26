@@ -1,9 +1,33 @@
-fastapi
-uvicorn
-python-multipart
-pikepdf
-PyMuPDF
-pdfplumber
-pytesseract
-Pillow
-python-dateutil
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+python-dotenv==1.0.1
+
+# PDF
+PyMuPDF==1.24.3
+pikepdf==9.0.0
+
+# Image & CV
+Pillow==10.3.0
+opencv-python==4.9.0.80
+numpy==1.26.4
+
+# OCR
+pytesseract==0.3.10
+
+# Date parsing
+python-dateutil==2.9.0
+
+# Face matching (local — no cloud required)
+deepface==0.0.93
+tf-keras==2.16.0        # required by deepface
+# tensorflow or tensorflow-cpu — pick one:
+tensorflow-cpu==2.16.2  # lighter; swap for tensorflow==2.16.2 if GPU available
+
+# Async task queue
+celery==5.4.0
+redis==5.0.4
+
+# Database
+sqlalchemy==2.0.30
+psycopg2-binary==2.9.9  # PostgreSQL driver
