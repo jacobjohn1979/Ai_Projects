@@ -398,6 +398,127 @@ def score_image_flags(flags: list[str]):
 
     return score, level
 
+def extract_id_card_fields(image_path: str):
+    flags = []
+    info = {}
+
+    try:
+        img = Image.open(image_path)
+        text = pytesseract.image_to_string(img)
+
+        info["ocr_text"] = text
+        info["text_length"] = len(text)
+
+        # Basic patterns
+        id_match = re.search(r"\b\d{8,12}\b", text)
+        dob_match = re.search(r"\b\d{2}[/-]\d{2}[/-]\d{4}\b", text)
+
+        info["id_number"] = id_match.group(0) if id_match else None
+        info["dob"] = dob_match.group(0) if dob_match else None
+
+        if not id_match:
+            flags.append("id_number_not_found")
+        if not dob_match:
+            flags.append("dob_not_found")
+
+        # MRZ-like lines (very simple detection)
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        mrz_lines = [line for line in lines if "<" in line and len(line) > 20]
+
+        info["mrz_lines"] = mrz_lines
+
+        if len(mrz_lines) < 2:
+            flags.append("mrz_not_detected")
+
+    except Exception as e:
+        flags.append("id_ocr_failed")
+        info["ocr_error"] = str(e)
+
+    return info, flags
+def analyze_id_card_regions(image_path: str):
+    flags = []
+    info = {}
+
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            flags.append("image_read_failed")
+            return info, flags
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape
+
+        # Rough zones
+        photo_region = gray[0:int(h*0.45), 0:int(w*0.28)]
+        text_region = gray[0:int(h*0.55), int(w*0.28):w]
+        mrz_region = gray[int(h*0.60):h, 0:w]
+
+        def lap_var(region):
+            return float(cv2.Laplacian(region, cv2.CV_64F).var())
+
+        photo_var = lap_var(photo_region)
+        text_var = lap_var(text_region)
+        mrz_var = lap_var(mrz_region)
+
+        info["photo_sharpness"] = round(photo_var, 4)
+        info["text_sharpness"] = round(text_var, 4)
+        info["mrz_sharpness"] = round(mrz_var, 4)
+
+        # Compare major differences
+        if abs(text_var - mrz_var) > 150:
+            flags.append("text_mrz_sharpness_mismatch")
+
+        if abs(photo_var - text_var) > 200:
+            flags.append("photo_text_sharpness_mismatch")
+
+    except Exception as e:
+        flags.append("region_analysis_failed")
+        info["region_error"] = str(e)
+
+    return info, flags
+def validate_id_card_consistency(field_info: dict):
+    flags = []
+    info = {}
+
+    ocr_text = field_info.get("ocr_text", "")
+    id_number = field_info.get("id_number")
+    mrz_lines = field_info.get("mrz_lines", [])
+
+    info["mrz_count"] = len(mrz_lines)
+
+    if id_number and mrz_lines:
+        mrz_joined = " ".join(mrz_lines)
+        if id_number not in mrz_joined:
+            flags.append("id_number_mrz_mismatch")
+
+    if len(ocr_text.strip()) < 30:
+        flags.append("very_low_id_text")
+
+    return info, flags
+def score_id_card_flags(flags: list[str]):
+    weights = {
+        "id_number_not_found": 15,
+        "dob_not_found": 10,
+        "mrz_not_detected": 20,
+        "id_ocr_failed": 20,
+        "text_mrz_sharpness_mismatch": 25,
+        "photo_text_sharpness_mismatch": 15,
+        "id_number_mrz_mismatch": 30,
+        "very_low_id_text": 10,
+        "region_analysis_failed": 10,
+        "image_read_failed": 20,
+    }
+
+    score = sum(weights.get(f, 5) for f in flags)
+
+    if score >= 50:
+        level = "HIGH"
+    elif score >= 20:
+        level = "MEDIUM"
+    else:
+        level = "LOW"
+
+    return score, level
 
 # =========================
 # ENDPOINTS
@@ -498,6 +619,57 @@ async def screen_image(file: UploadFile = File(...)):
     save_screening_log(result, file.filename, "image", "image")
 
     # ✅ Return response
+    return JSONResponse(result)
+#End Point ID card detection
+@app.post("/screen-id-card")
+async def screen_id_card(file: UploadFile = File(...)):
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in IMAGE_EXTENSIONS:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Unsupported image type"}
+        )
+
+    file_id = uuid.uuid4().hex
+    save_path = os.path.join(UPLOAD_DIR, f"{file_id}_{file.filename}")
+
+    with open(save_path, "wb") as f:
+        f.write(await file.read())
+
+    metadata_info, metadata_flags = extract_image_metadata(save_path)
+    ela_info, ela_flags = perform_ela(save_path)
+    field_info, field_flags = extract_id_card_fields(save_path)
+    region_info, region_flags = analyze_id_card_regions(save_path)
+    consistency_info, consistency_flags = validate_id_card_consistency(field_info)
+
+    all_flags = (
+        metadata_flags +
+        ela_flags +
+        field_flags +
+        region_flags +
+        consistency_flags
+    )
+
+    risk_score, risk_level = score_id_card_flags(all_flags)
+
+    result = {
+        "file_name": file.filename,
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "flags": all_flags,
+        "metadata": metadata_info,
+        "ela": ela_info,
+        "field_info": {
+            "id_number": field_info.get("id_number"),
+            "dob": field_info.get("dob"),
+            "mrz_lines": field_info.get("mrz_lines", []),
+            "text_length": field_info.get("text_length", 0),
+        },
+        "region_info": region_info,
+        "consistency_info": consistency_info,
+    }
+
+    save_screening_log(result, file.filename, "image", "id_card")
     return JSONResponse(result)
 
 @app.get("/")
