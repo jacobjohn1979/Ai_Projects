@@ -397,21 +397,68 @@ def score_image_flags(flags: list[str]):
         level = "LOW"
 
     return score, level
+# =========================
+# ID CARD DETECTION
+# =========================
+
+def preprocess_for_ocr(image_path: str):
+    img = cv2.imread(image_path)
+    if img is None:
+        return None
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.equalizeHist(gray)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+
+    return thresh
+
+
+def preprocess_mrz_region(image_path: str):
+    img = cv2.imread(image_path)
+    if img is None:
+        return None
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+
+    mrz = gray[int(h * 0.62):h, 0:w]
+    mrz = cv2.equalizeHist(mrz)
+    mrz = cv2.GaussianBlur(mrz, (3, 3), 0)
+    _, mrz = cv2.threshold(mrz, 140, 255, cv2.THRESH_BINARY)
+
+    return mrz
+
 
 def extract_id_card_fields(image_path: str):
     flags = []
     info = {}
 
     try:
-        img = Image.open(image_path)
-        text = pytesseract.image_to_string(img)
+        processed = preprocess_for_ocr(image_path)
+        mrz_processed = preprocess_mrz_region(image_path)
 
-        info["ocr_text"] = text
-        info["text_length"] = len(text)
+        if processed is None:
+            flags.append("id_ocr_failed")
+            info["ocr_error"] = "Unable to read image"
+            return info, flags
 
-        # Basic patterns
-        id_match = re.search(r"\b\d{8,12}\b", text)
-        dob_match = re.search(r"\b\d{2}[/-]\d{2}[/-]\d{4}\b", text)
+        text = pytesseract.image_to_string(processed, lang="eng", config="--psm 6")
+        mrz_text = ""
+        if mrz_processed is not None:
+            mrz_text = pytesseract.image_to_string(mrz_processed, lang="eng", config="--psm 6")
+
+        combined_text = f"{text}\n{mrz_text}".strip()
+
+        info["ocr_text"] = combined_text
+        info["text_length"] = len(combined_text)
+        info["mrz_raw_text"] = mrz_text
+
+        # ID number
+        id_match = re.search(r"\b\d{8,12}\b", combined_text)
+
+        # DOB: dd/mm/yyyy or dd-mm-yyyy
+        dob_match = re.search(r"\b\d{2}[/-]\d{2}[/-]\d{4}\b", combined_text)
 
         info["id_number"] = id_match.group(0) if id_match else None
         info["dob"] = dob_match.group(0) if dob_match else None
@@ -421,8 +468,8 @@ def extract_id_card_fields(image_path: str):
         if not dob_match:
             flags.append("dob_not_found")
 
-        # MRZ-like lines (very simple detection)
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        # MRZ-like lines
+        lines = [line.strip() for line in combined_text.splitlines() if line.strip()]
         mrz_lines = [line for line in lines if "<" in line and len(line) > 20]
 
         info["mrz_lines"] = mrz_lines
@@ -430,11 +477,16 @@ def extract_id_card_fields(image_path: str):
         if len(mrz_lines) < 2:
             flags.append("mrz_not_detected")
 
+        if len(combined_text.strip()) < 20:
+            flags.append("very_low_id_text")
+
     except Exception as e:
         flags.append("id_ocr_failed")
         info["ocr_error"] = str(e)
 
     return info, flags
+
+
 def analyze_id_card_regions(image_path: str):
     flags = []
     info = {}
@@ -448,10 +500,9 @@ def analyze_id_card_regions(image_path: str):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         h, w = gray.shape
 
-        # Rough zones
-        photo_region = gray[0:int(h*0.45), 0:int(w*0.28)]
-        text_region = gray[0:int(h*0.55), int(w*0.28):w]
-        mrz_region = gray[int(h*0.60):h, 0:w]
+        photo_region = gray[0:int(h * 0.45), 0:int(w * 0.28)]
+        text_region = gray[0:int(h * 0.55), int(w * 0.28):w]
+        mrz_region = gray[int(h * 0.60):h, 0:w]
 
         def lap_var(region):
             return float(cv2.Laplacian(region, cv2.CV_64F).var())
@@ -464,7 +515,6 @@ def analyze_id_card_regions(image_path: str):
         info["text_sharpness"] = round(text_var, 4)
         info["mrz_sharpness"] = round(mrz_var, 4)
 
-        # Compare major differences
         if abs(text_var - mrz_var) > 150:
             flags.append("text_mrz_sharpness_mismatch")
 
@@ -476,6 +526,8 @@ def analyze_id_card_regions(image_path: str):
         info["region_error"] = str(e)
 
     return info, flags
+
+
 def validate_id_card_consistency(field_info: dict):
     flags = []
     info = {}
@@ -494,17 +546,24 @@ def validate_id_card_consistency(field_info: dict):
     if len(ocr_text.strip()) < 30:
         flags.append("very_low_id_text")
 
+    # stronger combined rule
+    if "very_low_id_text" in flags and len(mrz_lines) == 0:
+        flags.append("strong_id_ocr_failure")
+
     return info, flags
+
+
 def score_id_card_flags(flags: list[str]):
     weights = {
         "id_number_not_found": 15,
         "dob_not_found": 10,
         "mrz_not_detected": 20,
-        "id_ocr_failed": 20,
+        "id_ocr_failed": 25,
         "text_mrz_sharpness_mismatch": 25,
-        "photo_text_sharpness_mismatch": 15,
+        "photo_text_sharpness_mismatch": 20,
         "id_number_mrz_mismatch": 30,
         "very_low_id_text": 10,
+        "strong_id_ocr_failure": 20,
         "region_analysis_failed": 10,
         "image_read_failed": 20,
     }
