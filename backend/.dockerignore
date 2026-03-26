@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local uploads (mounted as Docker volume at runtime)
+uploads/
+
+# Dev / editor files
+.env.example
+.git/
+.gitignore
+*.md
+.DS_Store
+*.log
+
+# Test files
+tests/
+*.test.py
+pytest.ini
+.coverage
+htmlcov/

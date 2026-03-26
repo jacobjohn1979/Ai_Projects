@@ -1,0 +1,176 @@
+version: "3.9"
+
+# ── Shared environment loaded from .env ───────────────────────────────────────
+x-app-env: &app-env
+  env_file: .env
+  environment:
+    - TESSERACT_CMD=/usr/bin/tesseract   # Linux path inside container
+    - UPLOAD_DIR=/app/uploads
+
+# ── Shared build context ──────────────────────────────────────────────────────
+x-app-build: &app-build
+  build:
+    context: ./fraud_detection
+    dockerfile: Dockerfile
+
+# ── Shared volume for uploads (all workers share same disk) ───────────────────
+x-uploads-volume: &uploads-volume
+  - uploads:/app/uploads
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-fraud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fraudpass}
+      POSTGRES_DB:       ${POSTGRES_DB:-fraud_detect}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fraud}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ── FastAPI ─────────────────────────────────────────────────────────────────
+  api:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: uvicorn app:app --host 0.0.0.0 --port 8001 --workers 2
+    volumes: *uploads-volume
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+      - external
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Celery worker — PDF queue ────────────────────────────────────────────────
+  worker-pdf:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: >
+      celery -A celery_app worker
+      --queues pdf
+      --concurrency 2
+      --loglevel info
+      --hostname pdf@%h
+    volumes: *uploads-volume
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ── Celery worker — Image queue ──────────────────────────────────────────────
+  worker-image:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: >
+      celery -A celery_app worker
+      --queues image
+      --concurrency 2
+      --loglevel info
+      --hostname image@%h
+    volumes: *uploads-volume
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ── Celery worker — ID card queue (heavy; concurrency 1) ────────────────────
+  worker-idcard:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: >
+      celery -A celery_app worker
+      --queues idcard
+      --concurrency 1
+      --loglevel info
+      --hostname idcard@%h
+    volumes: *uploads-volume
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ── Flower — Celery monitoring dashboard ─────────────────────────────────────
+  flower:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: >
+      celery -A celery_app flower
+      --port=8000
+      --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-flowerpass}
+    ports:
+      - "8000:8000"    # direct access for local dev (not proxied through nginx)
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+      - external
+
+  # ── Nginx — reverse proxy ────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - internal
+      - external
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  internal:
+    driver: bridge
+  external:
+    driver: bridge

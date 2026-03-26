@@ -18,3 +18,35 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+gitignore# ── Fraud Detection Service ───────────────────────────────────────────────────
+
+# Secrets
+backend/.env
+backend/**/.env
+
+# Python
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/**/*.pyo
+backend/**/.venv/
+backend/**/venv/
+backend/**/*.egg-info/
+
+# Uploads / runtime data
+backend/**/uploads/
+
+# Logs
+backend/**/*.log
+backend/**/logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+**/*.swp
+
+# Test artifacts
+backend/**/.coverage
+backend/**/.pytest_cache/
+backend/**/htmlcov/
