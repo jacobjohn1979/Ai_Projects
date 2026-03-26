@@ -401,33 +401,50 @@ def score_image_flags(flags: list[str]):
 # ID CARD DETECTION
 # =========================
 
-def preprocess_for_ocr(image_path: str):
-    img = cv2.imread(image_path)
-    if img is None:
-        return None
-
+def preprocess_gray(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
-    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+    return gray
 
+
+def threshold_image(gray, thresh_value=150):
+    _, thresh = cv2.threshold(gray, thresh_value, 255, cv2.THRESH_BINARY)
     return thresh
 
 
-def preprocess_mrz_region(image_path: str):
+def crop_id_regions(image_path: str):
     img = cv2.imread(image_path)
     if img is None:
         return None
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    h, w = gray.shape
+    h, w = img.shape[:2]
 
-    mrz = gray[int(h * 0.62):h, 0:w]
-    mrz = cv2.equalizeHist(mrz)
-    mrz = cv2.GaussianBlur(mrz, (3, 3), 0)
-    _, mrz = cv2.threshold(mrz, 140, 255, cv2.THRESH_BINARY)
+    regions = {
+        "full": img,
+        "photo": img[0:int(h * 0.45), 0:int(w * 0.28)],
+        "top_right_id": img[0:int(h * 0.18), int(w * 0.62):w],
+        "text_block": img[int(h * 0.10):int(h * 0.58), int(w * 0.25):w],
+        "dob_block": img[int(h * 0.38):int(h * 0.62), int(w * 0.20):int(w * 0.85)],
+        "mrz_block": img[int(h * 0.62):h, 0:w],
+    }
 
-    return mrz
+    return regions
+
+
+def ocr_region(img_region, psm=6, thresh_value=150):
+    if img_region is None or img_region.size == 0:
+        return ""
+
+    gray = preprocess_gray(img_region)
+    thresh = threshold_image(gray, thresh_value=thresh_value)
+
+    text = pytesseract.image_to_string(
+        thresh,
+        lang="eng",
+        config=f"--psm {psm}"
+    )
+    return text.strip()
 
 
 def extract_id_card_fields(image_path: str):
@@ -435,29 +452,38 @@ def extract_id_card_fields(image_path: str):
     info = {}
 
     try:
-        processed = preprocess_for_ocr(image_path)
-        mrz_processed = preprocess_mrz_region(image_path)
-
-        if processed is None:
+        regions = crop_id_regions(image_path)
+        if regions is None:
             flags.append("id_ocr_failed")
             info["ocr_error"] = "Unable to read image"
             return info, flags
 
-        text = pytesseract.image_to_string(processed, lang="eng", config="--psm 6")
-        mrz_text = ""
-        if mrz_processed is not None:
-            mrz_text = pytesseract.image_to_string(mrz_processed, lang="eng", config="--psm 6")
+        full_text = ocr_region(regions["full"], psm=6, thresh_value=150)
+        top_right_text = ocr_region(regions["top_right_id"], psm=7, thresh_value=140)
+        text_block_text = ocr_region(regions["text_block"], psm=6, thresh_value=150)
+        dob_block_text = ocr_region(regions["dob_block"], psm=6, thresh_value=145)
+        mrz_text = ocr_region(regions["mrz_block"], psm=6, thresh_value=140)
 
-        combined_text = f"{text}\n{mrz_text}".strip()
+        combined_text = "\n".join([
+            full_text,
+            top_right_text,
+            text_block_text,
+            dob_block_text,
+            mrz_text
+        ]).strip()
 
         info["ocr_text"] = combined_text
         info["text_length"] = len(combined_text)
+        info["top_right_text"] = top_right_text
         info["mrz_raw_text"] = mrz_text
 
-        # ID number
-        id_match = re.search(r"\b\d{8,12}\b", combined_text)
+        # ID number extraction:
+        # Prefer top-right region first
+        id_match_top = re.search(r"\b\d{8,12}\b", top_right_text)
+        id_match_any = re.search(r"\b\d{8,12}\b", combined_text)
+        id_match = id_match_top or id_match_any
 
-        # DOB: dd/mm/yyyy or dd-mm-yyyy
+        # DOB extraction
         dob_match = re.search(r"\b\d{2}[/-]\d{2}[/-]\d{4}\b", combined_text)
 
         info["id_number"] = id_match.group(0) if id_match else None
@@ -468,10 +494,9 @@ def extract_id_card_fields(image_path: str):
         if not dob_match:
             flags.append("dob_not_found")
 
-        # MRZ-like lines
+        # MRZ-like line detection
         lines = [line.strip() for line in combined_text.splitlines() if line.strip()]
-        mrz_lines = [line for line in lines if "<" in line and len(line) > 20]
-
+        mrz_lines = [line for line in lines if "<" in line and len(line) > 15]
         info["mrz_lines"] = mrz_lines
 
         if len(mrz_lines) < 2:
@@ -479,6 +504,9 @@ def extract_id_card_fields(image_path: str):
 
         if len(combined_text.strip()) < 20:
             flags.append("very_low_id_text")
+
+        if not id_match and len(mrz_lines) == 0:
+            flags.append("strong_id_ocr_failure")
 
     except Exception as e:
         flags.append("id_ocr_failed")
@@ -502,7 +530,8 @@ def analyze_id_card_regions(image_path: str):
 
         photo_region = gray[0:int(h * 0.45), 0:int(w * 0.28)]
         text_region = gray[0:int(h * 0.55), int(w * 0.28):w]
-        mrz_region = gray[int(h * 0.60):h, 0:w]
+        mrz_region = gray[int(h * 0.62):h, 0:w]
+        top_right_region = gray[0:int(h * 0.18), int(w * 0.62):w]
 
         def lap_var(region):
             return float(cv2.Laplacian(region, cv2.CV_64F).var())
@@ -510,16 +539,21 @@ def analyze_id_card_regions(image_path: str):
         photo_var = lap_var(photo_region)
         text_var = lap_var(text_region)
         mrz_var = lap_var(mrz_region)
+        top_right_var = lap_var(top_right_region)
 
         info["photo_sharpness"] = round(photo_var, 4)
         info["text_sharpness"] = round(text_var, 4)
         info["mrz_sharpness"] = round(mrz_var, 4)
+        info["top_right_sharpness"] = round(top_right_var, 4)
 
         if abs(text_var - mrz_var) > 150:
             flags.append("text_mrz_sharpness_mismatch")
 
         if abs(photo_var - text_var) > 200:
             flags.append("photo_text_sharpness_mismatch")
+
+        if abs(top_right_var - text_var) > 180:
+            flags.append("id_region_sharpness_mismatch")
 
     except Exception as e:
         flags.append("region_analysis_failed")
@@ -546,9 +580,8 @@ def validate_id_card_consistency(field_info: dict):
     if len(ocr_text.strip()) < 30:
         flags.append("very_low_id_text")
 
-    # stronger combined rule
     if "very_low_id_text" in flags and len(mrz_lines) == 0:
-        flags.append("strong_id_ocr_failure")
+        flags.append("high_review_risk_unreadable_id")
 
     return info, flags
 
@@ -561,14 +594,24 @@ def score_id_card_flags(flags: list[str]):
         "id_ocr_failed": 25,
         "text_mrz_sharpness_mismatch": 25,
         "photo_text_sharpness_mismatch": 20,
+        "id_region_sharpness_mismatch": 20,
         "id_number_mrz_mismatch": 30,
         "very_low_id_text": 10,
         "strong_id_ocr_failure": 20,
+        "high_review_risk_unreadable_id": 15,
         "region_analysis_failed": 10,
         "image_read_failed": 20,
     }
 
     score = sum(weights.get(f, 5) for f in flags)
+
+    # Separate interpretation
+    if "id_number_mrz_mismatch" in flags:
+        risk_type = "HIGH_TAMPER_RISK"
+    elif "strong_id_ocr_failure" in flags or "high_review_risk_unreadable_id" in flags:
+        risk_type = "HIGH_REVIEW_RISK"
+    else:
+        risk_type = "STANDARD_RISK"
 
     if score >= 50:
         level = "HIGH"
@@ -577,7 +620,7 @@ def score_id_card_flags(flags: list[str]):
     else:
         level = "LOW"
 
-    return score, level
+    return score, level, risk_type
 
 # =========================
 # ENDPOINTS
@@ -709,12 +752,13 @@ async def screen_id_card(file: UploadFile = File(...)):
         consistency_flags
     )
 
-    risk_score, risk_level = score_id_card_flags(all_flags)
+    risk_score, risk_level, risk_type = score_id_card_flags(all_flags)
 
     result = {
         "file_name": file.filename,
         "risk_score": risk_score,
         "risk_level": risk_level,
+        "risk_type": risk_type,
         "flags": all_flags,
         "metadata": metadata_info,
         "ela": ela_info,
@@ -723,6 +767,7 @@ async def screen_id_card(file: UploadFile = File(...)):
             "dob": field_info.get("dob"),
             "mrz_lines": field_info.get("mrz_lines", []),
             "text_length": field_info.get("text_length", 0),
+            "top_right_text": field_info.get("top_right_text", ""),
         },
         "region_info": region_info,
         "consistency_info": consistency_info,
@@ -730,7 +775,6 @@ async def screen_id_card(file: UploadFile = File(...)):
 
     save_screening_log(result, file.filename, "image", "id_card")
     return JSONResponse(result)
-
 @app.get("/")
 def home():
     return {"message": "Document Tamper Screening Service is running"}
