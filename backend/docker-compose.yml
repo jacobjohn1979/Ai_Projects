@@ -82,6 +82,7 @@ services:
       --concurrency 2
       --loglevel info
       --hostname pdf@%h
+      -E
     volumes: *uploads-volume
     depends_on:
       redis:
@@ -101,6 +102,7 @@ services:
       --concurrency 2
       --loglevel info
       --hostname image@%h
+      -E
     volumes: *uploads-volume
     depends_on:
       redis:
@@ -120,6 +122,7 @@ services:
       --concurrency 1
       --loglevel info
       --hostname idcard@%h
+      -E
     volumes: *uploads-volume
     depends_on:
       redis:
