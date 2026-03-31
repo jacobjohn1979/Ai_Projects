@@ -1,30 +1,33 @@
 """
-tasks.py — Celery async tasks for document screening
-Imports all screening functions from screening.py (shared module).
+tasks.py — Celery async tasks
+Only ID card screening runs as a Celery task (PDF and image are now sync in app.py).
+Fires a webhook callback on completion if callback_url is provided.
 """
 import os
 import re
+import json
 import uuid
 import hashlib
 import logging
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import datetime
 
 from celery_app import celery
-from database import save_screening_log, check_velocity
-from screening import (
-    inspect_pdf_forensics, extract_text_and_layout,
-    run_ocr_if_needed, field_checks_pdf, score_pdf,
+from database   import save_screening_log, check_velocity
+from screening  import (
     extract_image_metadata, perform_ela, noise_analysis,
-    copy_move_detection, basic_image_forensics, score_image,
-    extract_id_card_fields, analyze_id_card_regions, score_id_card,
-    DATE_REGEX, ID_REGEX,
+    copy_move_detection, extract_id_card_fields,
+    analyze_id_card_regions, score_id_card,
 )
 
 log = logging.getLogger("fraud_detect.tasks")
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+WEBHOOK_TIMEOUT = int(os.getenv("WEBHOOK_TIMEOUT_SECONDS", "10"))
 
 
 def _sha256(path: str) -> str:
@@ -36,133 +39,62 @@ def _sha256(path: str) -> str:
 
 
 def _remove(path):
+    try: Path(path).unlink(missing_ok=True)
+    except Exception: pass
+
+
+def _fire_webhook(callback_url: str, payload: dict):
+    """
+    POST the screening result to the callback URL.
+    Uses stdlib only — no extra dependencies.
+    Fails silently so a bad webhook never breaks the task result.
+    """
+    if not callback_url:
+        return
+
     try:
-        Path(path).unlink(missing_ok=True)
-    except Exception:
-        pass
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  PDF TASK
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@celery.task(bind=True, name="tasks.screen_pdf_task", max_retries=2, default_retry_delay=5)
-def screen_pdf_task(self, file_path: str, filename: str, applicant_id: str | None = None):
-    try:
-        sha256   = _sha256(file_path)
-        velocity = check_velocity(None, sha256)
-
-        forensic_info, forensic_flags = inspect_pdf_forensics(file_path)
-        text_info,     text_flags     = extract_text_and_layout(file_path)
-
-        scanned_like = ("image_based_pdf" in text_flags or
-                        "mixed_digital_and_scanned_pages" in text_flags)
-
-        ocr_info, ocr_flags = run_ocr_if_needed(file_path, scanned_like)
-
-        final_text = text_info["text"] or ocr_info.get("ocr_text", "")
-        field_info, field_flags = field_checks_pdf(final_text)
-
-        all_flags  = forensic_flags + text_flags + ocr_flags + field_flags + velocity["flags"]
-        risk_score, risk_level = score_pdf(all_flags)
-
-        result = {
-            "task_id":      self.request.id,
-            "file_name":    filename,
-            "sha256":       sha256,
-            "screened_at":  datetime.utcnow().isoformat(),
-            "applicant_id": applicant_id,
-            "risk_score":   risk_score,
-            "risk_level":   risk_level,
-            "flags":        all_flags,
-            "velocity":     velocity["counts"],
-            "forensics":    forensic_info,
-            "text_summary": {
-                "total_pages":        text_info["total_pages"],
-                "scanned_like_pages": text_info["scanned_like_pages"],
-                "text_length":        len(final_text),
-                "fonts":              text_info.get("fonts", {}),
+        body = json.dumps(payload).encode("utf-8")
+        req  = urllib.request.Request(
+            url     = callback_url,
+            data    = body,
+            method  = "POST",
+            headers = {
+                "Content-Type":  "application/json",
+                "User-Agent":    "FraudDetect-Webhook/3.1",
+                "X-Event-Type":  "screening.complete",
+                "X-Risk-Level":  payload.get("risk", {}).get("level", ""),
+                "X-Action":      payload.get("risk", {}).get("action", ""),
             },
-            "field_checks": field_info,
-            "ocr":          {"used": ocr_info.get("ocr_used", False)},
-        }
+        )
+        with urllib.request.urlopen(req, timeout=WEBHOOK_TIMEOUT) as resp:
+            log.info(f"Webhook delivered to {callback_url} — HTTP {resp.status}")
 
-        save_screening_log(result, filename, "pdf", "pdf", applicant_id)
-        return result
-
-    except Exception as exc:
-        log.error(f"screen_pdf_task failed: {exc}")
-        raise self.retry(exc=exc)
-    finally:
-        _remove(file_path)
+    except urllib.error.HTTPError as e:
+        log.warning(f"Webhook HTTP error {e.code} for {callback_url}")
+    except urllib.error.URLError as e:
+        log.warning(f"Webhook delivery failed for {callback_url}: {e.reason}")
+    except Exception as e:
+        log.warning(f"Webhook unexpected error for {callback_url}: {e}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  IMAGE TASK
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@celery.task(bind=True, name="tasks.screen_image_task", max_retries=2, default_retry_delay=5)
-def screen_image_task(self, file_path: str, filename: str, applicant_id: str | None = None):
-    try:
-        import pytesseract
-        from PIL import Image as PILImage
-
-        sha256   = _sha256(file_path)
-        velocity = check_velocity(None, sha256)
-
-        metadata_info, metadata_flags = extract_image_metadata(file_path)
-        ela_info,      ela_flags      = perform_ela(file_path)
-        noise_info,    noise_flags    = noise_analysis(file_path)
-        cm_info,       cm_flags       = copy_move_detection(file_path)
-        forensic_info, forensic_flags = basic_image_forensics(file_path)
-
-        ocr_text  = ""
-        ocr_flags = []
-        try:
-            ocr_text = pytesseract.image_to_string(PILImage.open(file_path))
-            if len(ocr_text.strip()) < 10:
-                ocr_flags.append("very_low_ocr_text")
-            if not re.findall(DATE_REGEX, ocr_text):
-                ocr_flags.append("no_date_pattern_found")
-            if not re.findall(ID_REGEX, ocr_text):
-                ocr_flags.append("no_id_like_pattern_found")
-        except Exception:
-            ocr_flags.append("ocr_failed")
-
-        all_flags  = (metadata_flags + ela_flags + noise_flags + cm_flags +
-                      forensic_flags + ocr_flags + velocity["flags"])
-        risk_score, risk_level = score_image(all_flags)
-
-        result = {
-            "task_id":         self.request.id,
-            "file_name":       filename,
-            "sha256":          sha256,
-            "screened_at":     datetime.utcnow().isoformat(),
-            "applicant_id":    applicant_id,
-            "risk_score":      risk_score,
-            "risk_level":      risk_level,
-            "flags":           all_flags,
-            "velocity":        velocity["counts"],
-            "metadata":        metadata_info,
-            "ela":             ela_info,
-            "noise_analysis":  noise_info,
-            "copy_move":       cm_info,
-            "image_forensics": forensic_info,
-            "ocr_summary":     {"text_length": len(ocr_text), "text_preview": ocr_text[:400]},
-        }
-
-        save_screening_log(result, filename, "image", "image", applicant_id)
-        return result
-
-    except Exception as exc:
-        log.error(f"screen_image_task failed: {exc}")
-        raise self.retry(exc=exc)
-    finally:
-        _remove(file_path)
+def _risk_summary(risk_score: int, risk_level: str, flags: list) -> dict:
+    descriptions = {
+        "HIGH":   "Document shows strong indicators of tampering or fraud. Manual review required.",
+        "MEDIUM": "Document has some anomalies. Recommend additional verification.",
+        "LOW":    "No significant tampering indicators detected. Document appears authentic.",
+    }
+    return {
+        "level":       risk_level,
+        "score":       risk_score,
+        "description": descriptions.get(risk_level, ""),
+        "flag_count":  len(flags),
+        "action":      "REJECT" if risk_level == "HIGH" else (
+                       "REVIEW" if risk_level == "MEDIUM" else "PASS"),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  ID CARD TASK
+#  ID CARD TASK — async, fires webhook on completion
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @celery.task(bind=True, name="tasks.screen_id_card_task", max_retries=2, default_retry_delay=10)
@@ -172,15 +104,17 @@ def screen_id_card_task(
     filename:     str,
     selfie_path:  str | None = None,
     applicant_id: str | None = None,
+    callback_url: str | None = None,
 ):
     try:
         from face_match     import analyze_liveness, match_faces
         from hologram       import analyze_hologram
         from template_match import match_template
 
-        sha256    = _sha256(file_path)
-        velocity  = check_velocity(None, sha256)
+        sha256   = _sha256(file_path)
+        velocity = check_velocity(None, sha256)
 
+        # ── Core forensics ────────────────────────────────────────────────────
         metadata_info, metadata_flags = extract_image_metadata(file_path)
         ela_info,      ela_flags      = perform_ela(file_path)
         noise_info,    noise_flags    = noise_analysis(file_path)
@@ -192,14 +126,17 @@ def screen_id_card_task(
         mrz_lines = field_info.get("mrz_lines", [])
         ocr_text  = field_info.get("ocr_text", "")
 
+        # ── Velocity check with ID number ─────────────────────────────────────
         if id_number:
             id_velocity = check_velocity(id_number, sha256)
             velocity["flags"]  += id_velocity["flags"]
             velocity["counts"].update(id_velocity["counts"])
 
+        # ── Hologram + template ───────────────────────────────────────────────
         holo_info, holo_flags = analyze_hologram(file_path)
         tmpl_info, tmpl_flags = match_template(file_path, ocr_text, mrz_lines)
 
+        # ── Face liveness + match ─────────────────────────────────────────────
         liveness_info,   liveness_flags   = {}, []
         face_match_info, face_match_flags = {}, []
 
@@ -210,6 +147,7 @@ def screen_id_card_task(
             liveness_flags   = ["selfie_not_provided"]
             face_match_flags = ["selfie_not_provided"]
 
+        # ── Score ─────────────────────────────────────────────────────────────
         all_flags = (
             metadata_flags + ela_flags + noise_flags + cm_flags +
             field_flags + region_flags + holo_flags + tmpl_flags +
@@ -217,20 +155,21 @@ def screen_id_card_task(
         )
         risk_score, risk_level = score_id_card(all_flags)
 
+        # ── Build result ──────────────────────────────────────────────────────
         result = {
-            "task_id":        self.request.id,
-            "file_name":      filename,
-            "sha256":         sha256,
-            "screened_at":    datetime.utcnow().isoformat(),
-            "applicant_id":   applicant_id,
-            "risk_score":     risk_score,
-            "risk_level":     risk_level,
-            "flags":          all_flags,
-            "velocity":       velocity["counts"],
-            "metadata":       metadata_info,
-            "ela":            ela_info,
-            "noise_analysis": noise_info,
-            "copy_move":      cm_info,
+            "task_id":       self.request.id,
+            "file_name":     filename,
+            "sha256":        sha256,
+            "screened_at":   datetime.utcnow().isoformat() + "Z",
+            "applicant_id":  applicant_id,
+            "document_type": "id_card",
+
+            # ── Risk decision (top-level for easy parsing) ────────────────────
+            "risk": _risk_summary(risk_score, risk_level, all_flags),
+
+            "flags": all_flags,
+
+            # ── Detail sections ───────────────────────────────────────────────
             "field_info": {
                 "id_number":       id_number,
                 "dob":             field_info.get("dob"),
@@ -239,19 +178,51 @@ def screen_id_card_task(
                 "mrz_checksum_ok": field_info.get("mrz_dob_checksum_ok"),
                 "text_length":     field_info.get("text_length", 0),
             },
+            "metadata":       metadata_info,
+            "ela":            ela_info,
+            "noise_analysis": noise_info,
+            "copy_move":      cm_info,
             "region_info":    region_info,
             "hologram":       holo_info,
             "template_match": tmpl_info,
             "liveness":       liveness_info,
             "face_match":     face_match_info,
+            "velocity":       velocity["counts"],
         }
 
+        # ── Save to DB ────────────────────────────────────────────────────────
         save_screening_log(result, filename, "image", "id_card", applicant_id)
+
+        # ── Fire webhook ──────────────────────────────────────────────────────
+        if callback_url:
+            _fire_webhook(callback_url, {
+                "event":        "screening.complete",
+                "task_id":      self.request.id,
+                "applicant_id": applicant_id,
+                "file_name":    filename,
+                "screened_at":  result["screened_at"],
+                "risk":         result["risk"],       # top-level risk for easy parsing
+                "flags":        all_flags,
+                "detail":       result,               # full detail for systems that need it
+            })
+
         return result
 
     except Exception as exc:
         log.error(f"screen_id_card_task failed: {exc}")
+
+        # ── Notify webhook of failure too ─────────────────────────────────────
+        if callback_url:
+            _fire_webhook(callback_url, {
+                "event":        "screening.failed",
+                "task_id":      self.request.id,
+                "applicant_id": applicant_id,
+                "file_name":    filename,
+                "error":        str(exc),
+            })
+
         raise self.retry(exc=exc)
+
     finally:
         _remove(file_path)
         if selfie_path:
