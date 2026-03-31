@@ -149,6 +149,22 @@ services:
       - internal
       - external
 
+  # ── Webhook receiver ─────────────────────────────────────────────────────────
+  webhook:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: uvicorn webhook_receiver:app --host 0.0.0.0 --port 8088
+    environment:
+      - WEBHOOK_LOG_DIR=/app/webhook_logs
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+    volumes:
+      - webhook_logs:/app/webhook_logs
+    ports:
+      - "8088:8088"
+    networks:
+      - internal
+      - external
+
   # ── Nginx — reverse proxy ────────────────────────────────────────────────────
   nginx:
     image: nginx:1.27-alpine
@@ -170,6 +186,7 @@ volumes:
   postgres_data:
   redis_data:
   uploads:
+  webhook_logs:
 
 # ── Networks ──────────────────────────────────────────────────────────────────
 networks:
