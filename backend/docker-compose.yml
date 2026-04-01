@@ -2,7 +2,7 @@
 x-app-env: &app-env
   env_file: .env
   environment:
-    - TESSERACT_CMD=/usr/bin/tesseract   # Linux path inside container
+    - TESSERACT_CMD=/usr/bin/tesseract
     - UPLOAD_DIR=/app/uploads
 
 # ── Shared build context ──────────────────────────────────────────────────────
@@ -13,13 +13,13 @@ x-app-build: &app-build
     args:
       UID: ${UID:-1000}
 
-# ── Shared volume for uploads (all workers share same disk) ───────────────────
+# ── Shared volume for uploads ─────────────────────────────────────────────────
 x-uploads-volume: &uploads-volume
   - uploads:/app/uploads
 
 services:
 
-  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -37,7 +37,7 @@ services:
     networks:
       - internal
 
-  # ── Redis ───────────────────────────────────────────────────────────────────
+  # ── Redis ────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -52,7 +52,7 @@ services:
     networks:
       - internal
 
-  # ── FastAPI ─────────────────────────────────────────────────────────────────
+  # ── FastAPI ──────────────────────────────────────────────────────────────────
   api:
     <<: [*app-build, *app-env]
     restart: unless-stopped
@@ -65,14 +65,13 @@ services:
         condition: service_healthy
     networks:
       - internal
-      - external
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/')"]
       interval: 15s
       timeout: 5s
       retries: 3
 
-  # ── Celery worker — PDF queue ────────────────────────────────────────────────
+  # ── Celery worker — PDF queue ─────────────────────────────────────────────────
   worker-pdf:
     <<: [*app-build, *app-env]
     restart: unless-stopped
@@ -92,7 +91,7 @@ services:
     networks:
       - internal
 
-  # ── Celery worker — Image queue ──────────────────────────────────────────────
+  # ── Celery worker — Image queue ───────────────────────────────────────────────
   worker-image:
     <<: [*app-build, *app-env]
     restart: unless-stopped
@@ -112,7 +111,7 @@ services:
     networks:
       - internal
 
-  # ── Celery worker — ID card queue (heavy; concurrency 1) ────────────────────
+  # ── Celery worker — ID card queue ─────────────────────────────────────────────
   worker-idcard:
     <<: [*app-build, *app-env]
     restart: unless-stopped
@@ -132,7 +131,7 @@ services:
     networks:
       - internal
 
-  # ── Flower — Celery monitoring dashboard ─────────────────────────────────────
+  # ── Flower — Celery monitoring dashboard ──────────────────────────────────────
   flower:
     <<: [*app-build, *app-env]
     restart: unless-stopped
@@ -141,7 +140,7 @@ services:
       --port=8000
       --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-flowerpass}
     ports:
-      - "8000:8000"    # direct access for local dev (not proxied through nginx)
+      - "8000:8000"
     depends_on:
       redis:
         condition: service_healthy
@@ -149,23 +148,24 @@ services:
       - internal
       - external
 
-  # ── Webhook receiver ─────────────────────────────────────────────────────────
+  # ── Webhook receiver ──────────────────────────────────────────────────────────
+  # Internal only — no external port exposed
+  # Access via Nginx on port 3000:
+  #   Dashboard : http://your-server:3000/webhook-dashboard/
+  #   Callback  : http://your-server:3000/webhook/kyc
   webhook:
     <<: [*app-build, *app-env]
     restart: unless-stopped
-    command: uvicorn webhook_receiver:app --host 0.0.0.0 --port 8088
+    command: uvicorn webhook_receiver:app --host 0.0.0.0 --port 8001
     environment:
       - WEBHOOK_LOG_DIR=/app/webhook_logs
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
     volumes:
       - webhook_logs:/app/webhook_logs
-    ports:
-      - "8088:8088"
     networks:
       - internal
-      - external
 
-  # ── Nginx — reverse proxy ────────────────────────────────────────────────────
+  # ── Nginx — reverse proxy ─────────────────────────────────────────────────────
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
