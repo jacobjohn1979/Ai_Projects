@@ -5,6 +5,7 @@ Fires a webhook callback on completion if callback_url is provided.
 """
 import os
 import re
+import sys
 import json
 import uuid
 import hashlib
@@ -13,6 +14,11 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from datetime import datetime
+
+# ── Ensure /app is in path for forked Celery subprocesses ────────────────────
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
 
 from celery_app import celery
 from database   import save_screening_log, check_velocity

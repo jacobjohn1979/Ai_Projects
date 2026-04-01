@@ -2,10 +2,18 @@
 celery_app.py — Celery + Redis broker configuration
 """
 import os
+import sys
 from celery import Celery
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ── Ensure /app is in Python path for all forked worker subprocesses ──────────
+# Without this, imports like face_match, hologram, template_match fail
+# in Celery's forked processes even though the files exist in /app
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
