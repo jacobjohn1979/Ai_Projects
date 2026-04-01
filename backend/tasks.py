@@ -15,18 +15,24 @@ import urllib.error
 from pathlib import Path
 from datetime import datetime
 
-# ── Ensure /app is in path for forked Celery subprocesses ────────────────────
+# ── CRITICAL: set path FIRST before any local imports ────────────────────────
+# Celery forks subprocesses — without this, local modules like face_match,
+# hologram, template_match cannot be found in the forked process.
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
-from celery_app import celery
-from database   import save_screening_log, check_velocity
-from screening  import (
+# ── All local imports at TOP LEVEL — never inside task functions ──────────────
+from celery_app     import celery
+from database       import save_screening_log, check_velocity
+from screening      import (
     extract_image_metadata, perform_ela, noise_analysis,
     copy_move_detection, extract_id_card_fields,
     analyze_id_card_regions, score_id_card,
 )
+from face_match     import analyze_liveness, match_faces
+from hologram       import analyze_hologram
+from template_match import match_template
 
 log = logging.getLogger("fraud_detect.tasks")
 
@@ -57,7 +63,6 @@ def _fire_webhook(callback_url: str, payload: dict):
     """
     if not callback_url:
         return
-
     try:
         body = json.dumps(payload).encode("utf-8")
         req  = urllib.request.Request(
@@ -74,7 +79,6 @@ def _fire_webhook(callback_url: str, payload: dict):
         )
         with urllib.request.urlopen(req, timeout=WEBHOOK_TIMEOUT) as resp:
             log.info(f"Webhook delivered to {callback_url} — HTTP {resp.status}")
-
     except urllib.error.HTTPError as e:
         log.warning(f"Webhook HTTP error {e.code} for {callback_url}")
     except urllib.error.URLError as e:
@@ -113,10 +117,6 @@ def screen_id_card_task(
     callback_url: str | None = None,
 ):
     try:
-        from face_match     import analyze_liveness, match_faces
-        from hologram       import analyze_hologram
-        from template_match import match_template
-
         sha256   = _sha256(file_path)
         velocity = check_velocity(None, sha256)
 
@@ -169,13 +169,8 @@ def screen_id_card_task(
             "screened_at":   datetime.utcnow().isoformat() + "Z",
             "applicant_id":  applicant_id,
             "document_type": "id_card",
-
-            # ── Risk decision (top-level for easy parsing) ────────────────────
-            "risk": _risk_summary(risk_score, risk_level, all_flags),
-
-            "flags": all_flags,
-
-            # ── Detail sections ───────────────────────────────────────────────
+            "risk":          _risk_summary(risk_score, risk_level, all_flags),
+            "flags":         all_flags,
             "field_info": {
                 "id_number":       id_number,
                 "dob":             field_info.get("dob"),
@@ -207,17 +202,15 @@ def screen_id_card_task(
                 "applicant_id": applicant_id,
                 "file_name":    filename,
                 "screened_at":  result["screened_at"],
-                "risk":         result["risk"],       # top-level risk for easy parsing
+                "risk":         result["risk"],
                 "flags":        all_flags,
-                "detail":       result,               # full detail for systems that need it
+                "detail":       result,
             })
 
         return result
 
     except Exception as exc:
         log.error(f"screen_id_card_task failed: {exc}")
-
-        # ── Notify webhook of failure too ─────────────────────────────────────
         if callback_url:
             _fire_webhook(callback_url, {
                 "event":        "screening.failed",
@@ -226,7 +219,6 @@ def screen_id_card_task(
                 "file_name":    filename,
                 "error":        str(exc),
             })
-
         raise self.retry(exc=exc)
 
     finally:
