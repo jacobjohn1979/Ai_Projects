@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Tesseract OCR
     tesseract-ocr \
     tesseract-ocr-eng \
+    tesseract-ocr-khm \
     # OpenCV runtime libs
     libgl1 \
     libglib2.0-0 \

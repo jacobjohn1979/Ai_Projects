@@ -29,7 +29,7 @@ from screening      import (
     extract_image_metadata, perform_ela, noise_analysis,
     copy_move_detection, extract_id_card_fields,
     analyze_id_card_regions, score_id_card,
-    run_ml_inference,
+    run_ml_inference, auto_rotate_id_card,
 )
 from face_match     import analyze_liveness, match_faces
 from hologram       import analyze_hologram
@@ -118,16 +118,20 @@ def screen_id_card_task(
     callback_url: str | None = None,
 ):
     try:
-        sha256   = _sha256(file_path)
+        # ── Auto-rotate portrait images to landscape ─────────────────────────
+        rotated_path = auto_rotate_id_card(file_path)
+        working_path = rotated_path  # use rotated version for all checks
+
+        sha256   = _sha256(file_path)   # hash original file for dedup
         velocity = check_velocity(None, sha256)
 
         # ── Core forensics ────────────────────────────────────────────────────
-        metadata_info, metadata_flags = extract_image_metadata(file_path)
-        ela_info,      ela_flags      = perform_ela(file_path)
-        noise_info,    noise_flags    = noise_analysis(file_path)
-        cm_info,       cm_flags       = copy_move_detection(file_path)
-        field_info,    field_flags    = extract_id_card_fields(file_path)
-        region_info,   region_flags   = analyze_id_card_regions(file_path)
+        metadata_info, metadata_flags = extract_image_metadata(working_path)
+        ela_info,      ela_flags      = perform_ela(working_path)
+        noise_info,    noise_flags    = noise_analysis(working_path)
+        cm_info,       cm_flags       = copy_move_detection(working_path)
+        field_info,    field_flags    = extract_id_card_fields(working_path)
+        region_info,   region_flags   = analyze_id_card_regions(working_path)
 
         id_number = field_info.get("id_number")
         mrz_lines = field_info.get("mrz_lines", [])
@@ -141,9 +145,9 @@ def screen_id_card_task(
 
         # ── Hologram + template ───────────────────────────────────────────────
         # ── ML inference ──────────────────────────────────────────────────────
-        ml_info, ml_flags = run_ml_inference(file_path)
+        ml_info, ml_flags = run_ml_inference(working_path)
 
-        holo_info, holo_flags = analyze_hologram(file_path)
+        holo_info, holo_flags = analyze_hologram(working_path)
         tmpl_info, tmpl_flags = match_template(file_path, ocr_text, mrz_lines)
 
         # ── Face liveness + match ─────────────────────────────────────────────
@@ -228,5 +232,8 @@ def screen_id_card_task(
 
     finally:
         _remove(file_path)
+        # remove rotated temp file if different from original
+        if 'rotated_path' in dir() and rotated_path != file_path:
+            _remove(rotated_path)
         if selfie_path:
             _remove(selfie_path)

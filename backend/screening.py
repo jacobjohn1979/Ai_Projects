@@ -49,6 +49,28 @@ def _remove(p):
     try: Path(p).unlink(missing_ok=True)
     except Exception: pass
 
+
+
+def auto_rotate_id_card(image_path: str) -> str:
+    """
+    Auto-rotate portrait ID card images to landscape.
+    KHM ID cards are always landscape (wider than tall).
+    Returns the path to use (rotated temp file or original).
+    """
+    import cv2
+    img = cv2.imread(image_path)
+    if img is None:
+        return image_path
+    h, w = img.shape[:2]
+    # If portrait (taller than wide) — rotate 90 degrees
+    if h > w:
+        rotated = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+        tmp_path = str(UPLOAD_DIR / f"rotated_{uuid.uuid4().hex}.jpg")
+        cv2.imwrite(tmp_path, rotated)
+        log.info(f"Auto-rotated portrait image {w}x{h} → {h}x{w}")
+        return tmp_path
+    return image_path
+
 def _parse_pdf_date(raw: Any):
     if not raw: return None
     text = re.sub(r"D:", "", str(raw))
@@ -383,9 +405,14 @@ def extract_id_card_fields(image_path: str):
         mrz_gray = gray[int(h*0.62):, :]
         _, mrz_proc = cv2.threshold(mrz_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        cfg  = "--oem 3 --psm 6"
-        text     = pytesseract.image_to_string(proc,     lang="eng", config=cfg)
-        mrz_text = pytesseract.image_to_string(mrz_proc, lang="eng", config=cfg)
+        cfg = "--oem 3 --psm 6"
+        # Try Khmer + English OCR first, fall back to English only
+        try:
+            text     = pytesseract.image_to_string(proc,     lang="khm+eng", config=cfg)
+            mrz_text = pytesseract.image_to_string(mrz_proc, lang="khm+eng", config=cfg)
+        except Exception:
+            text     = pytesseract.image_to_string(proc,     lang="eng", config=cfg)
+            mrz_text = pytesseract.image_to_string(mrz_proc, lang="eng", config=cfg)
         combined = f"{text}\n{mrz_text}".strip()
 
         info.update(ocr_text=combined, text_length=len(combined), mrz_raw_text=mrz_text)
@@ -503,6 +530,11 @@ def score_id_card(flags: list) -> tuple:
         "id_previously_flagged_high_risk":35,
         "ml_high_tamper_probability":40, "ml_possible_tamper":20,
         "ml_inference_failed":0,
+        # reduced weights for common non-fraud flags
+        "selfie_not_provided":0,       # not fraud — just not uploaded
+        "missing_exif_metadata":3,     # phone photos often have no EXIF
+        "missing_software_metadata":3, # same
+        "aspect_ratio_mismatch":8,     # portrait photo of landscape card
     }
     score = sum(weights.get(f.split(":")[0], 5) for f in flags)
     level = "HIGH" if score >= 50 else ("MEDIUM" if score >= 20 else "LOW")
