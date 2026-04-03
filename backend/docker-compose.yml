@@ -165,6 +165,14 @@ services:
     networks:
       - internal
 
+  # ── Analytics dashboard ──────────────────────────────────────────────────────
+  dashboard:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: uvicorn dashboard:app --host 0.0.0.0 --port 8002
+    networks:
+      - internal
+
   # ── Nginx — reverse proxy ─────────────────────────────────────────────────────
   nginx:
     image: nginx:1.27-alpine

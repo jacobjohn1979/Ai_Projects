@@ -29,6 +29,7 @@ from screening      import (
     extract_image_metadata, perform_ela, noise_analysis,
     copy_move_detection, extract_id_card_fields,
     analyze_id_card_regions, score_id_card,
+    run_ml_inference,
 )
 from face_match     import analyze_liveness, match_faces
 from hologram       import analyze_hologram
@@ -139,6 +140,9 @@ def screen_id_card_task(
             velocity["counts"].update(id_velocity["counts"])
 
         # ── Hologram + template ───────────────────────────────────────────────
+        # ── ML inference ──────────────────────────────────────────────────────
+        ml_info, ml_flags = run_ml_inference(file_path)
+
         holo_info, holo_flags = analyze_hologram(file_path)
         tmpl_info, tmpl_flags = match_template(file_path, ocr_text, mrz_lines)
 
@@ -157,7 +161,7 @@ def screen_id_card_task(
         all_flags = (
             metadata_flags + ela_flags + noise_flags + cm_flags +
             field_flags + region_flags + holo_flags + tmpl_flags +
-            liveness_flags + face_match_flags + velocity["flags"]
+            ml_flags + liveness_flags + face_match_flags + velocity["flags"]
         )
         risk_score, risk_level = score_id_card(all_flags)
 
@@ -188,6 +192,7 @@ def screen_id_card_task(
             "template_match": tmpl_info,
             "liveness":       liveness_info,
             "face_match":     face_match_info,
+            "ml_inference":   ml_info,
             "velocity":       velocity["counts"],
         }
 

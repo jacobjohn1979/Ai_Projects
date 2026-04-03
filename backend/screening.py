@@ -501,7 +501,64 @@ def score_id_card(flags: list) -> tuple:
         "no_face_detected":15,
         "duplicate_file_resubmission":30, "id_number_velocity_breach":25,
         "id_previously_flagged_high_risk":35,
+        "ml_high_tamper_probability":40, "ml_possible_tamper":20,
+        "ml_inference_failed":0,
     }
     score = sum(weights.get(f.split(":")[0], 5) for f in flags)
     level = "HIGH" if score >= 50 else ("MEDIUM" if score >= 20 else "LOW")
     return score, level
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ML MODEL INFERENCE
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Load model once at module import time (not on every request)
+_ml_model = None
+_ml_meta  = None
+
+def _load_ml_model():
+    global _ml_model, _ml_meta
+    try:
+        from ml_trainer import load_model
+        _ml_model, _ml_meta = load_model()
+    except Exception as e:
+        log.warning(f"ML model not loaded: {e}")
+
+_load_ml_model()
+
+
+def run_ml_inference(image_path: str) -> tuple:
+    """
+    Run ML model inference if a trained model exists.
+    Returns (info_dict, flags_list).
+    Silently skips if no model is trained yet.
+    """
+    flags, info = [], {}
+
+    if _ml_model is None:
+        info["ml_status"] = "no_model_trained"
+        return info, flags
+
+    try:
+        from ml_trainer import predict
+        result = predict(image_path, _ml_model, _ml_meta)
+        info.update(result)
+
+        if "ml_error" in result:
+            flags.append("ml_inference_failed")
+            return info, flags
+
+        score = result.get("ml_tamper_score", 0)
+        conf  = result.get("ml_confidence", 0)
+
+        if score > 0.8 and conf > 0.6:
+            flags.append("ml_high_tamper_probability")
+        elif score > 0.5:
+            flags.append("ml_possible_tamper")
+
+    except Exception as e:
+        flags.append("ml_inference_failed")
+        info["ml_error"] = str(e)
+
+    return info, flags
