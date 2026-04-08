@@ -165,6 +165,14 @@ services:
     networks:
       - internal
 
+  # ── Staff portal ─────────────────────────────────────────────────────────────
+  portal:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: uvicorn portal:app --host 0.0.0.0 --port 8003
+    networks:
+      - internal
+
   # ── Analytics dashboard ──────────────────────────────────────────────────────
   dashboard:
     <<: [*app-build, *app-env]
