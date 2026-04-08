@@ -554,3 +554,390 @@ def expiry_page():
 @app.get("/health", include_in_schema=False)
 def health():
     return {"status": "running", "service": "portal"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AUTH ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from auth import (init_auth_tables, authenticate_user, get_current_user,
+                  make_session_response, can, get_all_users,
+                  create_user, update_user, change_password)
+from fastapi.responses import Response as FResponse
+
+@app.on_event("startup")
+def startup():
+    init_auth_tables()
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(error: str = ""):
+    err = '<div class="alert alert-red">' + error + '</div>' if error else ""
+    html = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Login — KYC Portal</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,sans-serif;background:#0f172a;display:flex;
+     align-items:center;justify-content:center;min-height:100vh}
+.box{background:#fff;border-radius:12px;padding:40px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+h2{font-size:20px;font-weight:700;margin-bottom:4px}
+p{color:#64748b;font-size:13px;margin-bottom:24px}
+label{font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px}
+input{width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:6px;
+      font-size:13px;margin-bottom:16px;outline:none}
+input:focus{border-color:#3b82f6}
+button{width:100%;padding:11px;background:#3b82f6;color:#fff;border:none;
+       border-radius:6px;font-size:14px;font-weight:600;cursor:pointer}
+button:hover{background:#2563eb}
+.alert{padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;
+       background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+</style></head>
+<body><div class="box">
+  <h2>KYC Portal</h2>
+  <p>Sign in to access the staff portal</p>
+  """ + err + """
+  <form method="post" action="/portal/login">
+    <label>Username</label>
+    <input type="text" name="username" placeholder="Enter username" required autofocus>
+    <label>Password</label>
+    <input type="password" name="password" placeholder="Enter password" required>
+    <button type="submit">Sign In</button>
+  </form>
+</div></body></html>"""
+    return HTMLResponse(html)
+
+
+@app.post("/login")
+async def login(username: str = Form(""), password: str = Form("")):
+    user = authenticate_user(username, password)
+    if not user:
+        return RedirectResponse("/portal/login?error=Invalid+username+or+password", 303)
+    return make_session_response(user["username"], user["role"], "/portal/")
+
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse("/portal/login", 303)
+    response.delete_cookie("session_token")
+    return response
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PDF REPORT DOWNLOAD
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/report/{record_id}/pdf")
+def download_pdf_report(record_id: int, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse("/portal/login", 303)
+
+    from report_gen import generate_pdf_report
+    rows = _q("SELECT * FROM screening_logs WHERE id = :id", {"id": record_id})
+    if not rows:
+        raise HTTPException(404, "Record not found")
+
+    pdf_bytes = generate_pdf_report(rows[0])
+    if not pdf_bytes:
+        raise HTTPException(500, "PDF generation failed — reportlab not installed")
+
+    filename = f"KYC_Report_{record_id}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
+    return FResponse(
+        content     = pdf_bytes,
+        media_type  = "application/pdf",
+        headers     = {"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DUPLICATE DETECTION PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/duplicates", response_class=HTMLResponse)
+def duplicates_page(request: Request, days: int = 90):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse("/portal/login", 303)
+
+    from duplicate_detect import get_all_duplicates, get_duplicate_stats
+    dupes = get_all_duplicates(days)
+    stats = get_duplicate_stats(days)
+
+    rows_html = ""
+    for d in dupes:
+        applicants = ", ".join([a for a in (d.get("applicants") or []) if a])
+        rows_html += (
+            "<tr>"
+            "<td style='font-family:monospace;font-size:12px'>" + str(d.get("id_number","")) + "</td>"
+            "<td style='color:#ef4444;font-weight:700'>" + str(d.get("applicant_count","")) + "</td>"
+            "<td>" + applicants + "</td>"
+            "<td>" + str(d.get("submission_count","")) + "</td>"
+            "<td style='font-weight:700;color:" + RISK_COLOR.get(str(d.get("max_risk","")), "#94a3b8") + "'>" + str(d.get("max_risk","")) + "</td>"
+            "<td style='font-size:11px;color:#64748b'>" + str(d.get("last_seen",""))[:16] + "</td>"
+            "</tr>"
+        )
+
+    if not rows_html:
+        rows_html = "<tr><td colspan='6' style='text-align:center;padding:30px;color:#94a3b8'>No duplicate identities found in the last " + str(days) + " days</td></tr>"
+
+    content = (
+        '<div class="stat" style="margin-bottom:20px;display:inline-block;min-width:200px">'
+        '<div class="num" style="color:#ef4444">' + str(stats.get("duplicate_groups",0)) + '</div>'
+        '<div class="lbl">Duplicate Identity Groups (' + str(days) + 'd)</div>'
+        '</div>'
+        '<div class="card">'
+        '<div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">'
+        '<span style="font-size:13px;color:#64748b">Period:</span>'
+        '<a href="/portal/duplicates?days=30" class="btn btn-gray" style="padding:5px 12px;font-size:12px">30 days</a>'
+        '<a href="/portal/duplicates?days=90" class="btn btn-gray" style="padding:5px 12px;font-size:12px">90 days</a>'
+        '<a href="/portal/duplicates?days=365" class="btn btn-gray" style="padding:5px 12px;font-size:12px">1 year</a>'
+        '</div>'
+        '<table><thead><tr><th>ID Number</th><th>Applicant Count</th><th>Applicants</th>'
+        '<th>Submissions</th><th>Max Risk</th><th>Last Seen</th></tr></thead>'
+        '<tbody>' + rows_html + '</tbody></table>'
+        '</div>'
+    )
+    return HTMLResponse(_shell("Duplicate Detection", content, ""))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  EXPORT PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/export", response_class=HTMLResponse)
+def export_page(request: Request, msg: str = ""):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse("/portal/login", 303)
+    if not can(user, "export"):
+        raise HTTPException(403, "Export requires reviewer or admin role")
+
+    alert = ('<div class="alert alert-green">' + msg + '</div>') if msg else ""
+    content = alert + '''
+    <div class="grid-2">
+      <div class="card">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:16px">Export Cases to Excel</h3>
+        <form action="/portal/export/excel" method="get">
+          <div class="form-group">
+            <label>Period</label>
+            <select name="days">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="365">Last 12 months</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Risk Level</label>
+            <select name="risk">
+              <option value="">All</option>
+              <option value="HIGH">HIGH only</option>
+              <option value="MEDIUM">MEDIUM only</option>
+              <option value="LOW">LOW only</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-green">Download Excel</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:16px">Export Cases to CSV</h3>
+        <form action="/portal/export/csv" method="get">
+          <div class="form-group">
+            <label>Period</label>
+            <select name="days">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="365">Last 12 months</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Risk Level</label>
+            <select name="risk">
+              <option value="">All</option>
+              <option value="HIGH">HIGH only</option>
+            </select>
+          </div>
+          <button type="submit" class="btn">Download CSV</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:16px">Monthly Statistics Report</h3>
+        <p style="font-size:13px;color:#64748b;margin-bottom:14px">
+          12-month breakdown of all screening activity by month.
+        </p>
+        <a href="/portal/export/monthly" class="btn btn-green">Download Monthly Excel</a>
+      </div>
+    </div>'''
+    return HTMLResponse(_shell("Export", content, ""))
+
+
+@app.get("/export/excel")
+def export_excel(request: Request, days: int = 30, risk: str = ""):
+    user = get_current_user(request)
+    if not user or not can(user, "export"):
+        raise HTTPException(403)
+    from export import export_cases_excel
+    data = export_cases_excel(days, risk)
+    if not data:
+        raise HTTPException(500, "openpyxl not installed")
+    fname = f"KYC_Cases_{days}d_{datetime.utcnow().strftime('%Y%m%d')}.xlsx"
+    return FResponse(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+@app.get("/export/csv")
+def export_csv(request: Request, days: int = 30, risk: str = ""):
+    user = get_current_user(request)
+    if not user or not can(user, "export"):
+        raise HTTPException(403)
+    from export import export_cases_csv
+    data = export_cases_csv(days, risk)
+    fname = f"KYC_Cases_{days}d_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+    return FResponse(content=data, media_type="text/csv",
+                     headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+@app.get("/export/monthly")
+def export_monthly(request: Request):
+    user = get_current_user(request)
+    if not user or not can(user, "export"):
+        raise HTTPException(403)
+    from export import export_monthly_stats_excel
+    data = export_monthly_stats_excel()
+    if not data:
+        raise HTTPException(500, "openpyxl not installed")
+    fname = f"KYC_Monthly_{datetime.utcnow().strftime('%Y%m')}.xlsx"
+    return FResponse(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ADMIN — USER MANAGEMENT + API KEYS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, msg: str = "", error: str = ""):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse("/portal/login", 303)
+    if not can(user, "manage_users"):
+        raise HTTPException(403, "Admin access required")
+
+    from api_keys import get_all_keys, create_api_key
+
+    users    = get_all_users()
+    api_keys = get_all_keys()
+
+    alert = ""
+    if msg:   alert = '<div class="alert alert-green">' + msg + '</div>'
+    if error: alert = '<div class="alert alert-red">' + error + '</div>'
+
+    user_rows = ""
+    for u in users:
+        active_badge = '<span style="color:#22c55e;font-weight:600">Active</span>' if u.get("active") else '<span style="color:#ef4444;font-weight:600">Inactive</span>'
+        last_login   = str(u.get("last_login",""))[:16] or "Never"
+        user_rows += (
+            "<tr><td>" + str(u.get("id","")) + "</td>"
+            "<td style='font-weight:600'>" + str(u.get("username","")) + "</td>"
+            "<td>" + str(u.get("name","")) + "</td>"
+            "<td><span class='tag'>" + str(u.get("role","")) + "</span></td>"
+            "<td>" + active_badge + "</td>"
+            "<td style='font-size:12px;color:#64748b'>" + last_login + "</td>"
+            "</tr>"
+        )
+
+    key_rows = ""
+    for k in api_keys:
+        active = '<span style="color:#22c55e">Active</span>' if k.get("active") else '<span style="color:#ef4444">Revoked</span>'
+        key_rows += (
+            "<tr><td style='font-family:monospace'>" + str(k.get("key_prefix","")) + "…</td>"
+            "<td>" + str(k.get("name","")) + "</td>"
+            "<td>" + str(k.get("created_by","")) + "</td>"
+            "<td>" + active + "</td>"
+            "<td style='font-size:11px;color:#64748b'>" + str(k.get("last_used",""))[:16] + "</td>"
+            "<td><form method='post' action='/portal/admin/revoke-key' style='display:inline'>"
+            "<input type='hidden' name='key_id' value='" + str(k.get("id","")) + "'>"
+            "<button class='btn btn-red' style='padding:3px 10px;font-size:11px'>Revoke</button>"
+            "</form></td></tr>"
+        )
+
+    content = (
+        alert +
+        '<div class="grid-2">'
+
+        # User management
+        '<div class="card">'
+        '<h3 style="font-size:14px;font-weight:600;margin-bottom:14px">Staff Users</h3>'
+        '<table style="margin-bottom:16px"><thead><tr><th>ID</th><th>Username</th><th>Name</th><th>Role</th><th>Status</th><th>Last Login</th></tr></thead>'
+        '<tbody>' + user_rows + '</tbody></table>'
+        '<hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0">'
+        '<h4 style="font-size:13px;font-weight:600;margin-bottom:12px">Add New User</h4>'
+        '<form method="post" action="/portal/admin/create-user">'
+        '<div class="grid-2">'
+        '<div class="form-group"><label>Username</label><input name="username" required></div>'
+        '<div class="form-group"><label>Password</label><input type="password" name="password" required></div>'
+        '<div class="form-group"><label>Full Name</label><input name="name" required></div>'
+        '<div class="form-group"><label>Role</label><select name="role">'
+        '<option value="viewer">Viewer</option>'
+        '<option value="reviewer">Reviewer</option>'
+        '<option value="admin">Admin</option>'
+        '</select></div>'
+        '</div>'
+        '<div class="form-group"><label>Email</label><input type="email" name="email"></div>'
+        '<button type="submit" class="btn">Create User</button>'
+        '</form></div>'
+
+        # API keys
+        '<div class="card">'
+        '<h3 style="font-size:14px;font-weight:600;margin-bottom:14px">API Keys</h3>'
+        '<p style="font-size:12px;color:#64748b;margin-bottom:12px">'
+        'API keys secure the /screen-* endpoints. Enable in .env: <code>API_AUTH_ENABLED=true</code>'
+        '</p>'
+        '<table style="margin-bottom:16px"><thead><tr><th>Key Prefix</th><th>Name</th><th>Created By</th><th>Status</th><th>Last Used</th><th></th></tr></thead>'
+        '<tbody>' + (key_rows or '<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8">No API keys yet</td></tr>') + '</tbody></table>'
+        '<hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0">'
+        '<h4 style="font-size:13px;font-weight:600;margin-bottom:12px">Generate New API Key</h4>'
+        '<form method="post" action="/portal/admin/create-key">'
+        '<div class="form-group"><label>Key Name / Description</label>'
+        '<input name="key_name" placeholder="e.g. Mobile App, Partner Integration" required></div>'
+        '<button type="submit" class="btn">Generate Key</button>'
+        '</form></div>'
+        '</div>'
+    )
+    return HTMLResponse(_shell("Admin", content, ""))
+
+
+@app.post("/admin/create-user")
+async def create_user_route(
+    request: Request,
+    username: str = Form(""), password: str = Form(""),
+    role: str = Form("viewer"), name: str = Form(""), email: str = Form(""),
+):
+    user = get_current_user(request)
+    if not user or not can(user, "manage_users"):
+        raise HTTPException(403)
+    ok = create_user(username, password, role, name, email)
+    if ok:
+        return RedirectResponse("/portal/admin?msg=User+" + username + "+created", 303)
+    return RedirectResponse("/portal/admin?error=Failed+to+create+user+(username+may+exist)", 303)
+
+
+@app.post("/admin/create-key")
+async def create_key_route(request: Request, key_name: str = Form("")):
+    user = get_current_user(request)
+    if not user or not can(user, "manage_keys"):
+        raise HTTPException(403)
+    from api_keys import create_api_key
+    key = create_api_key(key_name, user["username"])
+    # Show key once — redirect with it in msg
+    return RedirectResponse("/portal/admin?msg=API+Key+created+(copy+now):+" + key, 303)
+
+
+@app.post("/admin/revoke-key")
+async def revoke_key_route(request: Request, key_id: int = Form(...)):
+    user = get_current_user(request)
+    if not user or not can(user, "manage_keys"):
+        raise HTTPException(403)
+    from api_keys import revoke_api_key
+    revoke_api_key(key_id)
+    return RedirectResponse("/portal/admin?msg=API+key+revoked", 303)

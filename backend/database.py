@@ -68,12 +68,12 @@ Index("ix_velocity_hash_time", VelocityEvent.file_sha256, VelocityEvent.submitte
 
 
 def init_db():
-    """Create tables if they don't exist — safe to call multiple times."""
+    """Create all tables if they don't exist."""
     try:
-        Base.metadata.create_all(bind=engine, checkfirst=True)
+        Base.metadata.create_all(bind=engine)
         log.info("Database tables initialised")
     except Exception as e:
-        log.error(f"DB init failed (non-fatal): {e}")
+        log.error(f"DB init failed: {e}")
 
 
 def get_db() -> Session:
@@ -124,6 +124,15 @@ def save_screening_log(
             db.add(ev)
 
         db.commit()
+
+        # ── Fire HIGH risk email alert ─────────────────────────────────────
+        if result.get("risk_level") == "HIGH" or result.get("risk", {}).get("level") == "HIGH":
+            try:
+                from alerts import send_high_risk_alert
+                send_high_risk_alert(result, filename, applicant_id)
+            except Exception as ae:
+                log.warning(f"Alert send failed (non-fatal): {ae}")
+
     except Exception as e:
         db.rollback()
         log.error(f"save_screening_log failed: {e}")
