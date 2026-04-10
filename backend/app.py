@@ -156,8 +156,33 @@ async def screen_pdf(
         final_text = text_info["text"] or ocr_info.get("ocr_text", "")
         field_info, field_flags = field_checks_pdf(final_text)
 
-        all_flags  = forensic_flags + text_flags + ocr_flags + field_flags + velocity["flags"]
+        # ── Banking PDF intelligence ──────────────────────────────────────────
+        try:
+            from pdf_banking import analyze_banking_pdf
+            # detect doc type from filename
+            fname_lower = file.filename.lower()
+            if any(k in fname_lower for k in ["statement","bank","account"]):
+                pdf_doc_type = "bank_statement"
+            elif any(k in fname_lower for k in ["payslip","salary","pay","wage"]):
+                pdf_doc_type = "payslip"
+            elif any(k in fname_lower for k in ["tax","irs","revenue","income"]):
+                pdf_doc_type = "tax"
+            elif any(k in fname_lower for k in ["utility","electric","water","bill"]):
+                pdf_doc_type = "utility"
+            else:
+                pdf_doc_type = "bank_statement"
+
+            banking_info, banking_flags, banking_score, _ = analyze_banking_pdf(
+                save_path, applicant_id or "", 0, pdf_doc_type
+            )
+        except Exception as be:
+            banking_info, banking_flags, banking_score = {}, [], 0
+            log.warning(f"Banking analysis non-fatal: {be}")
+
+        all_flags  = forensic_flags + text_flags + ocr_flags + field_flags + banking_flags + velocity["flags"]
         risk_score, risk_level = score_pdf(all_flags)
+        risk_score = min(risk_score + banking_score, 200)  # cap at 200
+        risk_level = "HIGH" if risk_score >= 50 else ("MEDIUM" if risk_score >= 20 else "LOW")
 
         result = {
             # ── Identity ──────────────────────────────────────────────────────
@@ -184,6 +209,7 @@ async def screen_pdf(
             "field_checks": field_info,
             "velocity":     velocity["counts"],
             "ocr_used":     ocr_info.get("ocr_used", False),
+            "banking_analysis": banking_info,
         }
 
         save_screening_log(result, file.filename, "pdf", "pdf", applicant_id)
