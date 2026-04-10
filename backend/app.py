@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
 from celery_app import celery
-from database   import init_db, get_submission_history, save_screening_log, check_velocity
+from Ai_Projects.backend.database_old   import init_db, get_submission_history, save_screening_log, check_velocity
 from screening  import (
     # PDF
     inspect_pdf_forensics, extract_text_and_layout,

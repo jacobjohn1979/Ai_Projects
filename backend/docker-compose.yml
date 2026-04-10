@@ -149,10 +149,6 @@ services:
       - external
 
   # ── Webhook receiver ──────────────────────────────────────────────────────────
-  # Internal only — no external port exposed
-  # Access via Nginx on port 3000:
-  #   Dashboard : http://your-server:3000/webhook-dashboard/
-  #   Callback  : http://your-server:3000/webhook/kyc
   webhook:
     <<: [*app-build, *app-env]
     restart: unless-stopped
@@ -173,20 +169,16 @@ services:
     networks:
       - internal
 
-  # ── Loan officer portal ─────────────────────────────────────────────────────
+  # ── Loan officer portal ───────────────────────────────────────────────────────
   loan-portal:
     <<: [*app-build, *app-env]
     restart: unless-stopped
     command: uvicorn loan_portal:app --host 0.0.0.0 --port 8005
-    environment:
-      <<: *app-env-map
-      KYC_API_URL: http://api:8001
-      KYC_PORTAL_URL: http://172.16.26.48:3000/dashboard/
     volumes: *uploads-volume
     networks:
       - internal
 
-  # ── Loan integration API ─────────────────────────────────────────────────────
+  # ── Loan integration API ──────────────────────────────────────────────────────
   loan-api:
     <<: [*app-build, *app-env]
     restart: unless-stopped
@@ -195,7 +187,7 @@ services:
     networks:
       - internal
 
-  # ── Analytics dashboard ──────────────────────────────────────────────────────
+  # ── Analytics dashboard ───────────────────────────────────────────────────────
   dashboard:
     <<: [*app-build, *app-env]
     restart: unless-stopped
