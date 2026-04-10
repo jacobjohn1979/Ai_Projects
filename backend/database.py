@@ -99,17 +99,18 @@ def save_screening_log(
         if doc_type == "id_card":
             id_number = result.get("field_info", {}).get("id_number")
 
-        log_entry = ScreeningLog(
-            file_name    = filename,
-            file_sha256  = result.get("sha256"),
-            category     = category,
-            doc_type     = doc_type,
-            risk_score   = result.get("risk_score", 0),
-            risk_level   = result.get("risk_level", "UNKNOWN"),
-            flags        = result.get("flags", []),
-            full_result  = result,
-            id_number    = id_number,
-            applicant_id = applicant_id,
+       # Support both flat and nested risk format
+_risk_obj   = result.get("risk", {}) or {}
+_risk_level = (_risk_obj.get("level") or result.get("risk_level") or "UNKNOWN")
+_risk_score = (_risk_obj.get("score") or result.get("risk_score") or 0)
+
+log_entry = ScreeningLog(
+    file_name    = filename,
+    file_sha256  = result.get("sha256"),
+    category     = category,
+    doc_type     = doc_type,
+    risk_score   = _risk_score,
+    risk_level   = _risk_level,
         )
         db.add(log_entry)
 
@@ -119,14 +120,14 @@ def save_screening_log(
                 id_number    = id_number,
                 file_sha256  = result.get("sha256"),
                 applicant_id = applicant_id,
-                risk_level   = result.get("risk_level", "UNKNOWN"),
+                risk_level   = _risk_level,
             )
             db.add(ev)
 
         db.commit()
 
         # ── Fire HIGH risk email alert ─────────────────────────────────────
-        if result.get("risk_level") == "HIGH" or result.get("risk", {}).get("level") == "HIGH":
+        if _risk_level == "HIGH":
             try:
                 from alerts import send_high_risk_alert
                 send_high_risk_alert(result, filename, applicant_id)
