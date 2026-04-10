@@ -173,6 +173,19 @@ services:
     networks:
       - internal
 
+  # ── Loan officer portal ─────────────────────────────────────────────────────
+  loan-portal:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: uvicorn loan_portal:app --host 0.0.0.0 --port 8005
+    environment:
+      <<: *app-env-map
+      KYC_API_URL: http://api:8001
+      KYC_PORTAL_URL: http://172.16.26.48:3000/dashboard/
+    volumes: *uploads-volume
+    networks:
+      - internal
+
   # ── Loan integration API ─────────────────────────────────────────────────────
   loan-api:
     <<: [*app-build, *app-env]
