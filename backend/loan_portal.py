@@ -1114,14 +1114,15 @@ def admin_page(request: Request, msg: str = "", error: str = ""):
         role    = o.get("role", "officer")
         ll      = str(o.get("last_login",""))[:16] or "Never"
         rc      = {"admin":"#7c3aed","manager":"#0284c7","officer":"#475569"}.get(role,"#475569")
+        active_html = "<span style='color:#22c55e;font-weight:600'>Active</span>" if active else "<span style='color:#ef4444'>Inactive</span>"
         rows += (
-            f"<tr>"
-            f"<td style='font-weight:500'>{o.get('username','')}</td>"
-            f"<td>{o.get('name','')}</td>"
-            f"<td><span class='badge' style='background:{rc}20;color:{rc}'>{role}</span></td>"
-            f"<td>{'<span style=\"color:#22c55e;font-weight:600\">Active</span>' if active else '<span style=\"color:#ef4444\">Inactive</span>'}</td>"
-            f"<td style='font-size:12px;color:var(--muted)'>{ll}</td>"
-            f"</tr>"
+            "<tr>"
+            "<td style='font-weight:500'>" + str(o.get('username','')) + "</td>"
+            "<td>" + str(o.get('name','')) + "</td>"
+            "<td><span class='badge' style='background:" + rc + "20;color:" + rc + "'>" + role + "</span></td>"
+            "<td>" + active_html + "</td>"
+            "<td style='font-size:12px;color:var(--muted)'>" + ll + "</td>"
+            "</tr>"
         )
 
     alert = _alert(msg,"ok") if msg else (_alert(error,"err") if error else "")
