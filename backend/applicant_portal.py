@@ -161,82 +161,162 @@ STATUS_COLORS = {
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 CSS = """
-:root{--primary:#dc2626;--primary-h:#b91c1c;--surface:#fff7f7;--card:#fff;
-      --border:#fecaca;--text:#1a0a0a;--muted:#78716c;--ok:#16a34a;
-      --warn:#d97706;--info:#1d4ed8}
+:root{
+  --primary:#1e6fbc;--primary-h:#1558a0;--primary-light:#e8f2fb;
+  --accent:#0ea5e9;--accent-h:#0284c7;
+  --surface:#f0f7ff;--surface2:#e1effc;
+  --card:#ffffff;--border:#c7ddf5;--border-light:#ddeeff;
+  --text:#0d1f35;--muted:#5a7a99;--muted-light:#8aaac8;
+  --ok:#059669;--ok-bg:#ecfdf5;--ok-border:#6ee7b7;
+  --warn:#d97706;--warn-bg:#fffbeb;--warn-border:#fcd34d;
+  --danger:#dc2626;--danger-bg:#fef2f2;--danger-border:#fca5a5;
+  --info:#1d4ed8;--info-bg:#eff6ff;--info-border:#93c5fd;
+}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Noto Sans Khmer','Segoe UI',sans-serif;
-     background:var(--surface);color:var(--text);min-height:100vh}
-.topbar{background:var(--primary);color:#fff;padding:0 20px;height:56px;
+     background:var(--surface);color:var(--text);min-height:100vh;font-size:14px}
+
+/* ── Topbar ── */
+.topbar{background:#1a2e4a;color:#fff;padding:0 24px;height:60px;
         display:flex;align-items:center;justify-content:space-between;
-        position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(220,38,38,.3)}
-.topbar-brand{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
-.topbar-right{display:flex;align-items:center;gap:10px}
-.lang-btn{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);
-           padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;font-weight:600}
-.lang-btn:hover{background:rgba(255,255,255,.25)}
-.nav-link{color:rgba(255,255,255,.85);font-size:13px;font-weight:500;padding:6px 10px;
-           border-radius:4px;cursor:pointer}
-.nav-link:hover{background:rgba(255,255,255,.15);color:#fff}
-.container{max-width:720px;margin:0 auto;padding:24px 16px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;
-      padding:24px;margin-bottom:16px;box-shadow:0 1px 4px rgba(220,38,38,.06)}
-.card-title{font-size:13px;font-weight:700;color:var(--primary);text-transform:uppercase;
-            letter-spacing:.5px;margin-bottom:16px;padding-bottom:10px;
-            border-bottom:1px solid var(--border)}
-.form-group{margin-bottom:14px}
-label.lbl{font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:5px}
-input,select,textarea{width:100%;padding:10px 13px;border:1.5px solid #e5e7eb;
-  border-radius:8px;font-size:14px;outline:none;font-family:inherit;
-  background:#fff;color:var(--text);transition:border .15s}
+        position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(0,0,0,.15)}
+.topbar-brand{display:flex;align-items:center;gap:10px}
+.brand-icon{width:34px;height:34px;background:var(--accent);border-radius:8px;
+            display:flex;align-items:center;justify-content:center;
+            font-size:16px;font-weight:800;color:#fff;flex-shrink:0}
+.brand-text{font-size:14px;font-weight:700;color:#f0f7ff;letter-spacing:.2px}
+.brand-sub{font-size:11px;color:#7aa8cc;margin-top:1px}
+.topbar-right{display:flex;align-items:center;gap:8px}
+.lang-btn{background:rgba(255,255,255,.1);color:#c8dff0;
+           border:1px solid rgba(255,255,255,.15);padding:5px 12px;
+           border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
+.lang-btn:hover{background:rgba(255,255,255,.18);color:#fff}
+.nav-link{color:#a8c8e8;font-size:13px;font-weight:500;padding:6px 12px;
+           border-radius:6px;cursor:pointer;transition:all .15s}
+.nav-link:hover{background:rgba(255,255,255,.1);color:#fff}
+
+/* ── Container ── */
+.container{max-width:740px;margin:0 auto;padding:28px 16px}
+
+/* ── Cards ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;
+      padding:24px 26px;margin-bottom:18px;
+      box-shadow:0 2px 8px rgba(30,111,188,.06),0 1px 2px rgba(0,0,0,.04)}
+.card-title{font-size:11px;font-weight:700;color:var(--primary);text-transform:uppercase;
+            letter-spacing:.7px;margin-bottom:18px;padding-bottom:12px;
+            border-bottom:1px solid var(--border-light);
+            display:flex;align-items:center;gap:6px}
+
+/* ── Forms ── */
+.form-group{margin-bottom:16px}
+label.lbl{font-size:12px;font-weight:600;color:#2c4a6e;display:block;margin-bottom:6px}
+input,select,textarea{width:100%;padding:10px 13px;border:1.5px solid #cdddef;
+  border-radius:9px;font-size:14px;outline:none;font-family:inherit;
+  background:#fff;color:var(--text);transition:all .15s}
 input:focus,select:focus,textarea:focus{border-color:var(--primary);
-  box-shadow:0 0 0 3px rgba(220,38,38,.08)}
-input[type=file]{padding:8px;background:#fef2f2;border-color:var(--border)}
+  box-shadow:0 0 0 3px rgba(30,111,188,.1);background:#fafcff}
+input[type=file]{padding:10px 12px;background:var(--primary-light);
+                 border-color:var(--border);border-style:dashed;cursor:pointer}
+input[type=file]:hover{background:#dceeff;border-color:var(--primary)}
+input::placeholder{color:var(--muted-light)}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.field-hint{font-size:11px;color:var(--muted);margin-top:4px}
+
+/* ── Buttons ── */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
-     padding:11px 22px;border-radius:8px;font-size:14px;font-weight:600;
-     cursor:pointer;border:none;transition:all .15s;width:100%;margin-top:6px}
-.btn-primary{background:var(--primary);color:#fff}
-.btn-primary:hover{background:var(--primary-h)}
-.btn-ghost{background:#f9fafb;color:#374151;border:1.5px solid #e5e7eb}
-.btn-ghost:hover{background:#f3f4f6}
-.btn-sm{width:auto;padding:7px 16px;font-size:13px;margin-top:0}
-.alert{padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:14px;
-       display:flex;align-items:flex-start;gap:8px;line-height:1.5}
-.alert-ok{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534}
-.alert-err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
-.alert-info{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}
-.alert-warn{background:#fffbeb;border:1px solid #fde68a;color:#92400e}
-.status-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;
-             border-radius:20px;font-size:12px;font-weight:700}
-.app-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
-          padding:16px 18px;margin-bottom:12px;cursor:pointer;transition:all .15s;
-          display:flex;align-items:center;justify-content:space-between}
-.app-card:hover{border-color:var(--primary);box-shadow:0 2px 8px rgba(220,38,38,.1)}
-.app-ref{font-weight:700;font-size:14px;color:var(--primary);font-family:monospace}
-.app-meta{font-size:12px;color:var(--muted);margin-top:3px}
-.progress-bar{height:6px;background:#fee2e2;border-radius:3px;overflow:hidden;margin:14px 0}
-.progress-fill{height:100%;background:var(--primary);border-radius:3px;transition:width .5s}
-.step-row{display:flex;justify-content:space-between;margin-bottom:20px}
-.step{text-align:center;flex:1;position:relative}
-.step-dot{width:28px;height:28px;border-radius:50%;background:#fee2e2;border:2px solid var(--border);
-          display:flex;align-items:center;justify-content:center;margin:0 auto 6px;
-          font-size:11px;font-weight:700;color:var(--muted)}
+     padding:11px 22px;border-radius:9px;font-size:14px;font-weight:600;
+     cursor:pointer;border:none;transition:all .15s;width:100%;margin-top:8px;
+     letter-spacing:.1px}
+.btn-primary{background:var(--primary);color:#fff;
+             box-shadow:0 2px 8px rgba(30,111,188,.3)}
+.btn-primary:hover{background:var(--primary-h);
+                   box-shadow:0 4px 14px rgba(30,111,188,.4);transform:translateY(-1px)}
+.btn-ghost{background:#f8fafc;color:#374151;border:1.5px solid #d1dfe9}
+.btn-ghost:hover{background:#eef4fb;border-color:var(--border)}
+.btn-accent{background:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(14,165,233,.3)}
+.btn-accent:hover{background:var(--accent-h);transform:translateY(-1px)}
+.btn-sm{width:auto;padding:7px 16px;font-size:13px;margin-top:0;border-radius:7px}
+.btn-outline{background:transparent;color:var(--primary);
+             border:1.5px solid var(--primary);font-weight:600}
+.btn-outline:hover{background:var(--primary-light)}
+
+/* ── Alerts ── */
+.alert{padding:12px 16px;border-radius:9px;font-size:13px;margin-bottom:16px;
+       display:flex;align-items:flex-start;gap:10px;line-height:1.6}
+.alert-ok{background:var(--ok-bg);border:1px solid var(--ok-border);color:#065f46}
+.alert-err{background:var(--danger-bg);border:1px solid var(--danger-border);color:#991b1b}
+.alert-info{background:var(--info-bg);border:1px solid var(--info-border);color:#1e40af}
+.alert-warn{background:var(--warn-bg);border:1px solid var(--warn-border);color:#92400e}
+
+/* ── Status pill ── */
+.status-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;
+             border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.2px}
+.status-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.8}
+
+/* ── App cards (dashboard list) ── */
+.app-card{background:var(--card);border:1px solid var(--border);border-radius:14px;
+          padding:18px 20px;margin-bottom:12px;cursor:pointer;transition:all .2s;
+          display:flex;align-items:center;justify-content:space-between;
+          box-shadow:0 1px 4px rgba(30,111,188,.05)}
+.app-card:hover{border-color:var(--primary);
+                box-shadow:0 4px 16px rgba(30,111,188,.12);transform:translateY(-1px)}
+.app-ref{font-weight:700;font-size:14px;color:var(--primary);font-family:monospace;
+          letter-spacing:.3px}
+.app-meta{font-size:12px;color:var(--muted);margin-top:4px}
+.app-amount{font-size:16px;font-weight:700;color:var(--text)}
+
+/* ── Progress & Steps ── */
+.progress-bar{height:6px;background:var(--surface2);border-radius:4px;
+              overflow:hidden;margin:16px 0}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));
+               border-radius:4px;transition:width .6s ease}
+.step-row{display:flex;justify-content:space-between;margin-bottom:24px;
+          position:relative}
+.step-row:before{content:'';position:absolute;top:13px;left:14px;right:14px;
+                 height:2px;background:var(--border);z-index:0}
+.step{text-align:center;flex:1;position:relative;z-index:1}
+.step-dot{width:28px;height:28px;border-radius:50%;background:#fff;
+          border:2px solid var(--border);display:flex;align-items:center;
+          justify-content:center;margin:0 auto 7px;font-size:11px;font-weight:700;
+          color:var(--muted);transition:all .3s}
 .step.done .step-dot{background:var(--ok);border-color:var(--ok);color:#fff}
-.step.active .step-dot{background:var(--primary);border-color:var(--primary);color:#fff}
+.step.active .step-dot{background:var(--primary);border-color:var(--primary);
+                        color:#fff;box-shadow:0 0 0 3px rgba(30,111,188,.2)}
 .step-label{font-size:10px;color:var(--muted);font-weight:500}
 .step.active .step-label{color:var(--primary);font-weight:700}
-.step.done .step-label{color:var(--ok)}
-.divider{border:none;border-top:1px solid var(--border);margin:16px 0}
-.hero{text-align:center;padding:40px 20px 20px}
-.hero-icon{font-size:48px;margin-bottom:12px}
-.hero h1{font-size:22px;font-weight:700;color:var(--primary);margin-bottom:6px}
-.hero p{font-size:14px;color:var(--muted);line-height:1.6;max-width:400px;margin:0 auto}
-.tab-row{display:flex;gap:0;margin-bottom:20px;border:1.5px solid var(--border);
-         border-radius:8px;overflow:hidden}
-.tab{flex:1;padding:10px;text-align:center;font-size:13px;font-weight:600;
-     cursor:pointer;background:#fff;color:var(--muted);border:none;transition:all .15s}
-.tab.active{background:var(--primary);color:#fff}
+.step.done .step-label{color:var(--ok);font-weight:600}
+
+/* ── Misc ── */
+.divider{border:none;border-top:1px solid var(--border-light);margin:18px 0}
+.hero{text-align:center;padding:36px 20px 18px}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;background:var(--primary-light);
+            color:var(--primary);padding:5px 14px;border-radius:20px;
+            font-size:12px;font-weight:600;margin-bottom:16px;border:1px solid var(--border)}
+.hero h1{font-size:24px;font-weight:800;color:var(--text);margin-bottom:8px;
+          letter-spacing:-.3px}
+.hero p{font-size:14px;color:var(--muted);line-height:1.7;max-width:420px;margin:0 auto}
+.feature-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}
+.feature-item{background:var(--primary-light);border:1px solid var(--border);
+              border-radius:10px;padding:14px;text-align:center}
+.feature-icon{font-size:20px;margin-bottom:6px}
+.feature-text{font-size:11px;font-weight:600;color:var(--primary)}
+.tab-row{display:flex;gap:0;margin-bottom:22px;background:var(--surface2);
+         border-radius:10px;padding:4px;border:1px solid var(--border)}
+.tab{flex:1;padding:9px;text-align:center;font-size:13px;font-weight:600;
+     cursor:pointer;background:transparent;color:var(--muted);border:none;
+     border-radius:7px;transition:all .15s}
+.tab.active{background:var(--card);color:var(--primary);
+            box-shadow:0 1px 4px rgba(30,111,188,.15)}
+.upload-zone{background:var(--primary-light);border:2px dashed var(--border);
+             border-radius:10px;padding:16px;text-align:center;
+             transition:all .15s;cursor:pointer}
+.upload-zone:hover{background:#dceeff;border-color:var(--primary)}
+.upload-label{font-size:12px;color:var(--muted);margin-top:6px}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.info-item{padding:10px 0;border-bottom:1px solid var(--border-light)}
+.info-item:last-child,.info-item:nth-last-child(2){border-bottom:none}
+.info-key{font-size:11px;color:var(--muted);font-weight:500;margin-bottom:3px}
+.info-val{font-size:14px;font-weight:600;color:var(--text)}
 """
 
 
@@ -404,8 +484,11 @@ def _shell(request: Request, content: str, title_key: str = "title",
 <body>
   <div class="topbar">
     <div class="topbar-brand">
-      <span>🏦</span>
-      <span>{t['title']}</span>
+      <div class="brand-icon">B</div>
+      <div>
+        <div class="brand-text">{t['title']}</div>
+        <div class="brand-sub">{t['subtitle']}</div>
+      </div>
     </div>
     <div class="topbar-right">
       {nav}
@@ -477,9 +560,24 @@ def login_page(request: Request, error: str = "", tab: str = "phone"):
 
     content = f"""
     <div class="hero">
-      <div class="hero-icon">🏦</div>
-      <h1>{t['title']}</h1>
-      <p>{t['subtitle']}</p>
+      <div class="hero-badge">🏦 {t['title']}</div>
+      <h1>{t['subtitle']}</h1>
+      <p>Fast, secure and fully digital. Apply in minutes from anywhere.</p>
+    </div>
+
+    <div class="feature-row">
+      <div class="feature-item">
+        <div class="feature-icon">⚡</div>
+        <div class="feature-text">Instant Decision</div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🔒</div>
+        <div class="feature-text">Secure & Private</div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">📱</div>
+        <div class="feature-text">Track Anytime</div>
+      </div>
     </div>
 
     <div class="card">
@@ -495,14 +593,16 @@ def login_page(request: Request, error: str = "", tab: str = "phone"):
         <div class="form-group">
           <label class="lbl">{t['phone']}</label>
           <div style="display:flex;gap:8px">
-            <input type="tel" id="phone-input" placeholder="+855 xx xxx xxx" style="flex:1">
-            <button class="btn btn-ghost btn-sm" onclick="sendOTP()">{t['send_otp']}</button>
+            <input type="tel" id="phone-input" placeholder="+855 xx xxx xxx"
+                   style="flex:1">
+            <button class="btn btn-accent btn-sm" onclick="sendOTP()">{t['send_otp']}</button>
           </div>
         </div>
         <div class="form-group" id="otp-box" style="display:none">
           <label class="lbl">{t['otp']}</label>
           <input type="text" id="otp-input" placeholder="000000" maxlength="6"
-                 style="letter-spacing:8px;font-size:20px;text-align:center">
+                 style="letter-spacing:10px;font-size:22px;text-align:center;font-weight:700">
+          <div class="field-hint">Enter the 6-digit code sent to your phone</div>
         </div>
         <div id="otp-msg"></div>
         <button class="btn btn-primary" onclick="verifyOTP()"
@@ -518,13 +618,15 @@ def login_page(request: Request, error: str = "", tab: str = "phone"):
           </div>
           <div class="form-group">
             <label class="lbl">{t['password']}</label>
-            <input type="password" name="password" required>
+            <input type="password" name="password" required placeholder="••••••••">
           </div>
           <button type="submit" class="btn btn-primary">{t['login']}</button>
         </form>
-        <hr class="divider">
-        <p style="text-align:center;font-size:13px;color:var(--muted);margin-bottom:10px">
-          New applicant? <a href="/apply/register" style="color:var(--primary);font-weight:600">{t['register']}</a>
+        <div class="divider"></div>
+        <p style="text-align:center;font-size:13px;color:var(--muted)">
+          New applicant?
+          <a href="/apply/register"
+             style="color:var(--primary);font-weight:700">{t['register']}</a>
         </p>
       </div>
     </div>
@@ -536,16 +638,14 @@ def login_page(request: Request, error: str = "", tab: str = "phone"):
       document.getElementById('tab-phone').className = 'tab' + (tab==='phone' ? ' active' : '');
       document.getElementById('tab-email').className = 'tab' + (tab==='email' ? ' active' : '');
     }}
-
     async function sendOTP() {{
       const phone = document.getElementById('phone-input').value.trim();
       if (!phone) return;
       const msg = document.getElementById('otp-msg');
       msg.innerHTML = '<div class="alert alert-info"><span>ℹ</span><span>Sending...</span></div>';
       const r = await fetch('/apply/send-otp', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-        body: 'phone=' + encodeURIComponent(phone)
+        method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}},
+        body:'phone=' + encodeURIComponent(phone)
       }});
       const d = await r.json();
       if (d.sent) {{
@@ -556,19 +656,16 @@ def login_page(request: Request, error: str = "", tab: str = "phone"):
         msg.innerHTML = '<div class="alert alert-err"><span>✕</span><span>' + d.message + '</span></div>';
       }}
     }}
-
     async function verifyOTP() {{
       const phone = document.getElementById('phone-input').value.trim();
       const otp   = document.getElementById('otp-input').value.trim();
       const r = await fetch('/apply/verify-otp', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-        body: 'phone=' + encodeURIComponent(phone) + '&otp=' + encodeURIComponent(otp)
+        method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}},
+        body:'phone='+encodeURIComponent(phone)+'&otp='+encodeURIComponent(otp)
       }});
       const d = await r.json();
-      if (d.success) {{
-        window.location.href = d.redirect;
-      }} else {{
+      if (d.success) {{ window.location.href = d.redirect; }}
+      else {{
         document.getElementById('otp-msg').innerHTML =
           '<div class="alert alert-err"><span>✕</span><span>' + d.message + '</span></div>';
       }}
@@ -755,32 +852,51 @@ def dashboard(request: Request):
         dt     = str(l.get("created_at",""))[:10]
         ltype  = l.get("loan_type","")
         ref    = l.get("loan_ref","")
+        c      = STATUS_COLORS.get(status,"#94a3b8")
         cards += f"""
         <a href="/apply/case/{ref}" style="text-decoration:none">
           <div class="app-card">
-            <div>
-              <div class="app-ref">{ref}</div>
-              <div class="app-meta">{ltype} · {amt} · {dt}</div>
+            <div style="display:flex;align-items:center;gap:14px">
+              <div style="width:42px;height:42px;border-radius:10px;
+                   background:{c}18;border:1px solid {c}40;
+                   display:flex;align-items:center;justify-content:center;
+                   font-size:18px;flex-shrink:0">💼</div>
+              <div>
+                <div class="app-ref">{ref}</div>
+                <div class="app-meta">{ltype} · {dt}</div>
+              </div>
             </div>
-            {_status_pill(status, lang)}
+            <div style="text-align:right">
+              <div class="app-amount">{amt}</div>
+              <div style="margin-top:5px">{_status_pill(status, lang)}</div>
+            </div>
           </div>
         </a>"""
 
     if not cards:
         cards = f"""
-        <div style="text-align:center;padding:40px;color:var(--muted)">
-          <div style="font-size:40px;margin-bottom:12px">📄</div>
-          <p>{t['no_apps']}</p>
-          <a href="/apply/new" class="btn btn-primary" style="width:auto;margin-top:16px;padding:10px 24px">{t['new_app']}</a>
+        <div style="text-align:center;padding:48px 20px">
+          <div style="width:64px;height:64px;background:var(--primary-light);
+               border-radius:16px;display:flex;align-items:center;justify-content:center;
+               font-size:28px;margin:0 auto 16px">📋</div>
+          <h3 style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px">
+            {t['no_apps']}
+          </h3>
+          <p style="font-size:13px;color:var(--muted);margin-bottom:20px">
+            Get started by submitting your first loan application.
+          </p>
+          <a href="/apply/new" class="btn btn-primary"
+             style="width:auto;display:inline-flex;padding:11px 28px">{t['new_app']}</a>
         </div>"""
 
     content = f"""
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
       <div>
-        <h2 style="font-size:18px;font-weight:700">{t['welcome']}, {user.get('name','')}</h2>
-        <p style="font-size:13px;color:var(--muted);margin-top:2px">{t['my_apps']}</p>
+        <h2 style="font-size:20px;font-weight:800;color:var(--text)">{t['welcome']}, {user.get('name','')}</h2>
+        <p style="font-size:13px;color:var(--muted);margin-top:3px">{t['my_apps']}</p>
       </div>
-      <a href="/apply/new" class="btn btn-primary" style="width:auto;padding:9px 18px">{t['new_app']}</a>
+      <a href="/apply/new" class="btn btn-primary"
+         style="width:auto;padding:10px 20px">{t['new_app']}</a>
     </div>
     {cards}"""
 
