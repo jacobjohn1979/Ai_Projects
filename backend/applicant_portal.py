@@ -1199,7 +1199,7 @@ def case_status(loan_ref: str, request: Request):
 
     <div class="card">
       <div class="card-title">{t['upload_docs']}</div>
-      {''.join(f"<div style='padding:6px 0;border-bottom:1px solid #fef2f2;font-size:13px'>📄 {d}</div>" for d in (json.loads(loan['docs_uploaded']) if loan.get('docs_uploaded') else [])) or "<p style='color:var(--muted);font-size:13px'>No documents uploaded yet</p>"}
+      {''.join(f"<div style='padding:6px 0;border-bottom:1px solid #fef2f2;font-size:13px'>📄 {d}</div>" for d in (json.loads(loan['docs_uploaded'] if isinstance(loan.get('docs_uploaded'), list) else (json.loads(loan['docs_uploaded']) if loan.get('docs_uploaded') else [])) or "<p style='color:var(--muted);font-size:13px'>No documents uploaded yet</p>"}
     </div>"""
 
     return HTMLResponse(_shell(request, content, user=user))
