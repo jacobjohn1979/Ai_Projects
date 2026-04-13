@@ -45,96 +45,179 @@ LOAN_TYPES = ["Personal Loan", "Business / SME Loan", "Mortgage / Home Loan",
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 CSS = """
-:root{--nav:#0c4a6e;--nav-hover:#0369a1;--nav-active:#0284c7;--accent:#0284c7;
-      --accent-h:#0369a1;--border:#e5e7eb;--surface:#f0f9ff;--card:#fff;
-      --text:#0f172a;--muted:#64748b;--danger:#dc2626;--warn:#d97706;--ok:#16a34a}
+:root{
+  --nav:#1a2744;--nav-hover:#243460;--nav-active:#2d4a9e;
+  --accent:#2563eb;--accent-h:#1d4ed8;--accent-light:#eff6ff;
+  --border:#e2e8f0;--surface:#f8fafc;--card:#ffffff;
+  --text:#0f172a;--muted:#64748b;--muted-light:#94a3b8;
+  --danger:#dc2626;--danger-bg:#fef2f2;--danger-border:#fecaca;
+  --warn:#d97706;--warn-bg:#fffbeb;--warn-border:#fde68a;
+  --ok:#16a34a;--ok-bg:#f0fdf4;--ok-border:#bbf7d0;
+  --info:#1d4ed8;--info-bg:#eff6ff;--info-border:#bfdbfe;
+  --sidebar-width:240px;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-     background:var(--surface);color:var(--text);display:flex;min-height:100vh}
+body{font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+     background:var(--surface);color:var(--text);display:flex;min-height:100vh;
+     font-size:14px;line-height:1.5}
 a{text-decoration:none;color:inherit}
-.sidebar{width:220px;background:var(--nav);display:flex;flex-direction:column;
-         position:fixed;top:0;left:0;height:100vh;z-index:100}
-.sidebar-logo{padding:20px 16px 14px;border-bottom:1px solid rgba(255,255,255,.1)}
-.sidebar-logo .title{color:#fff;font-size:14px;font-weight:700}
-.sidebar-logo .sub{color:#7dd3fc;font-size:11px;margin-top:2px}
-.nav-section{padding:12px 8px 4px;color:#38bdf8;font-size:10px;font-weight:600;
-             letter-spacing:.8px;text-transform:uppercase}
-.nav-item{display:flex;align-items:center;gap:10px;padding:9px 16px;border-radius:6px;
-          margin:1px 8px;color:#bae6fd;font-size:13px;font-weight:500;cursor:pointer}
-.nav-item:hover{background:var(--nav-hover);color:#fff}
-.nav-item.active{background:var(--nav-active);color:#fff}
-.sidebar-user{margin-top:auto;padding:12px 16px;border-top:1px solid rgba(255,255,255,.1)}
-.user-avatar{width:30px;height:30px;border-radius:50%;background:var(--nav-active);
+
+/* ── Sidebar ── */
+.sidebar{width:var(--sidebar-width);background:var(--nav);display:flex;
+         flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:100;
+         box-shadow:4px 0 20px rgba(0,0,0,.15)}
+.sidebar-logo{padding:22px 20px 16px;border-bottom:1px solid rgba(255,255,255,.07)}
+.logo-mark{width:36px;height:36px;background:var(--accent);border-radius:8px;
+           display:flex;align-items:center;justify-content:center;
+           font-size:16px;font-weight:800;color:#fff;margin-bottom:10px;
+           box-shadow:0 2px 8px rgba(37,99,235,.4)}
+.sidebar-logo .title{color:#f1f5f9;font-size:13px;font-weight:600;letter-spacing:.2px}
+.sidebar-logo .sub{color:#64748b;font-size:11px;margin-top:2px}
+.nav-section{padding:16px 20px 6px;color:#475569;font-size:10px;font-weight:600;
+             letter-spacing:1px;text-transform:uppercase}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 14px;border-radius:8px;
+          margin:2px 10px;color:#94a3b8;font-size:13px;font-weight:500;
+          cursor:pointer;transition:all .15s;border:1px solid transparent}
+.nav-item svg{opacity:.6;flex-shrink:0;width:16px;height:16px}
+.nav-item:hover{background:rgba(255,255,255,.06);color:#e2e8f0}
+.nav-item:hover svg{opacity:.9}
+.nav-item.active{background:rgba(37,99,235,.2);color:#93c5fd;
+                 border-color:rgba(37,99,235,.3)}
+.nav-item.active svg{opacity:1}
+.nav-divider{margin:8px 20px;border-top:1px solid rgba(255,255,255,.06)}
+.sidebar-user{margin-top:auto;padding:14px 16px;border-top:1px solid rgba(255,255,255,.06);
+              background:rgba(0,0,0,.15)}
+.user-avatar{width:32px;height:32px;border-radius:8px;background:var(--accent);
              display:flex;align-items:center;justify-content:center;
-             color:#fff;font-size:11px;font-weight:700;flex-shrink:0}
-.main{margin-left:220px;flex:1;display:flex;flex-direction:column}
-.topbar{background:var(--card);border-bottom:1px solid var(--border);padding:0 24px;
-        height:56px;display:flex;align-items:center;justify-content:space-between;
-        position:sticky;top:0;z-index:50}
-.topbar-title{font-size:15px;font-weight:600}
-.content{padding:24px;flex:1}
-.card{background:var(--card);border:1px solid var(--border);border-radius:10px;
-      padding:20px;margin-bottom:16px}
+             color:#fff;font-size:12px;font-weight:700;flex-shrink:0}
+
+/* ── Main ── */
+.main{margin-left:var(--sidebar-width);flex:1;display:flex;flex-direction:column;min-height:100vh}
+.topbar{background:var(--card);border-bottom:1px solid var(--border);padding:0 28px;
+        height:58px;display:flex;align-items:center;justify-content:space-between;
+        position:sticky;top:0;z-index:50;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.topbar-title{font-size:15px;font-weight:600;color:var(--text)}
+.topbar-subtitle{font-size:12px;color:var(--muted)}
+.topbar-right{display:flex;align-items:center;gap:8px}
+.content{padding:28px;flex:1;max-width:1400px}
+
+/* ── Cards ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+      padding:22px 24px;margin-bottom:18px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .card-title{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;
-            letter-spacing:.5px;margin-bottom:14px}
-.stats{display:grid;gap:12px;margin-bottom:20px}
+            letter-spacing:.6px}
+.card-value{font-size:13px;font-weight:500;color:var(--text)}
+
+/* ── Stats ── */
+.stats{display:grid;gap:14px;margin-bottom:22px}
 .stats-4{grid-template-columns:repeat(4,1fr)}
 .stats-3{grid-template-columns:repeat(3,1fr)}
-.stat-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
-.stat-num{font-size:24px;font-weight:700;margin-bottom:2px}
-.stat-lbl{font-size:11px;color:var(--muted)}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+           padding:18px 20px;box-shadow:0 1px 3px rgba(0,0,0,.04);transition:box-shadow .2s}
+.stat-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.08)}
+.stat-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;
+           justify-content:center;margin-bottom:12px;font-size:16px}
+.stat-num{font-size:26px;font-weight:700;letter-spacing:-.5px;margin-bottom:2px}
+.stat-lbl{font-size:11px;color:var(--muted);font-weight:500}
+.stat-trend{font-size:11px;margin-top:6px}
+
+/* ── Table ── */
+.table-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th{padding:9px 12px;text-align:left;font-size:10px;font-weight:600;color:var(--muted);
-   text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);
-   background:var(--surface)}
-td{padding:10px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
-tr:hover td{background:#f8fafc}
-input,select,textarea{width:100%;padding:8px 11px;border:1px solid var(--border);
-  border-radius:6px;font-size:13px;outline:none;font-family:inherit;
-  background:var(--card);color:var(--text)}
+th{padding:10px 14px;text-align:left;font-size:10px;font-weight:600;color:var(--muted);
+   text-transform:uppercase;letter-spacing:.5px;background:#f8fafc;
+   border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:11px 14px;border-bottom:1px solid #f1f5f9;vertical-align:middle;color:var(--text)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fafbfc}
+
+/* ── Forms ── */
+input,select,textarea{width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;
+  border-radius:8px;font-size:13px;outline:none;font-family:inherit;
+  background:#fff;color:var(--text);transition:border .15s,box-shadow .15s}
 input:focus,select:focus,textarea:focus{border-color:var(--accent);
-  box-shadow:0 0 0 3px rgba(2,132,199,.08)}
-.form-group{margin-bottom:14px}
-label.lbl{font-size:12px;font-weight:500;color:#374151;display:block;margin-bottom:5px}
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  box-shadow:0 0 0 3px rgba(37,99,235,.08)}
+input::placeholder{color:var(--muted-light)}
+.form-group{margin-bottom:16px}
+label.lbl{font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:6px;
-     font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .15s}
-.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:var(--accent-h)}
-.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
-.btn-ghost:hover{background:var(--surface)}
-.btn-danger{background:#fef2f2;color:var(--danger);border:1px solid #fecaca}
-.btn-success{background:#f0fdf4;color:var(--ok);border:1px solid #bbf7d0}
-.btn-warn{background:#fffbeb;color:var(--warn);border:1px solid #fde68a}
-.btn-sm{padding:5px 10px;font-size:12px}
-.badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:4px;
-       font-size:11px;font-weight:600}
-.alert{padding:11px 14px;border-radius:6px;font-size:13px;margin-bottom:14px;
-       display:flex;align-items:flex-start;gap:8px}
-.alert-ok{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534}
-.alert-err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
-.alert-warn{background:#fffbeb;border:1px solid #fde68a;color:#92400e}
-.alert-info{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}
-.pipeline{display:flex;gap:0;margin-bottom:20px}
-.pipe-step{flex:1;text-align:center;padding:10px 8px;font-size:11px;font-weight:600;
-           border-top:3px solid var(--border);color:var(--muted);position:relative}
-.pipe-step.active{border-top-color:var(--accent);color:var(--accent)}
-.pipe-step.done{border-top-color:var(--ok);color:var(--ok)}
-.pipe-step.danger{border-top-color:var(--danger);color:var(--danger)}
-hr.div{border:none;border-top:1px solid var(--border);margin:16px 0}
-.tag{display:inline-block;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:3px;
-     padding:2px 6px;font-size:11px;margin:2px;color:#475569}
-.page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
-.page-header h1{font-size:18px;font-weight:700}
-.comment-box{background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:12px;
-             margin-bottom:8px;font-size:13px}
-.comment-meta{font-size:11px;color:var(--muted);margin-bottom:4px}
+.grid-4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
+.field-hint{font-size:11px;color:var(--muted);margin-top:4px}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border-radius:8px;
+     font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .15s;
+     white-space:nowrap}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 3px rgba(37,99,235,.3)}
+.btn-primary:hover{background:var(--accent-h);box-shadow:0 2px 8px rgba(37,99,235,.4)}
+.btn-ghost{background:transparent;color:var(--muted);border:1.5px solid var(--border)}
+.btn-ghost:hover{background:var(--surface);color:var(--text);border-color:#cbd5e1}
+.btn-danger{background:var(--danger-bg);color:var(--danger);border:1px solid var(--danger-border)}
+.btn-danger:hover{background:#fee2e2}
+.btn-success{background:var(--ok-bg);color:var(--ok);border:1px solid var(--ok-border)}
+.btn-success:hover{background:#dcfce7}
+.btn-warn{background:var(--warn-bg);color:var(--warn);border:1px solid var(--warn-border)}
+.btn-navy{background:#1a2744;color:#fff}.btn-navy:hover{background:#243460}
+.btn-sm{padding:5px 12px;font-size:12px;border-radius:6px}
+.btn-lg{padding:11px 24px;font-size:14px;font-weight:600}
+
+/* ── Badges ── */
+.badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:6px;
+       font-size:11px;font-weight:600;letter-spacing:.2px}
+
+/* ── Alerts ── */
+.alert{padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:16px;
+       display:flex;align-items:flex-start;gap:10px;line-height:1.5}
+.alert-ok{background:var(--ok-bg);border:1px solid var(--ok-border);color:#166534}
+.alert-err{background:var(--danger-bg);border:1px solid var(--danger-border);color:#991b1b}
+.alert-warn{background:var(--warn-bg);border:1px solid var(--warn-border);color:#92400e}
+.alert-info{background:var(--info-bg);border:1px solid var(--info-border);color:#1e40af}
+
+/* ── Pipeline ── */
+.pipeline{display:flex;gap:0;margin-bottom:22px;background:var(--card);
+          border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.pipe-step{flex:1;text-align:center;padding:12px 8px;font-size:11px;font-weight:600;
+           border-left:1px solid var(--border);color:var(--muted-light);position:relative;
+           transition:all .2s}
+.pipe-step:first-child{border-left:none}
+.pipe-step.active{background:var(--accent-light);color:var(--accent);border-color:transparent}
+.pipe-step.done{background:#f0fdf4;color:var(--ok);border-color:transparent}
+.pipe-step.danger{background:var(--danger-bg);color:var(--danger);border-color:transparent}
+.pipe-step .step-num{font-size:9px;display:block;margin-bottom:3px;opacity:.7}
+
+/* ── Misc ── */
+hr.div{border:none;border-top:1px solid var(--border);margin:18px 0}
+.tag{display:inline-block;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:5px;
+     padding:2px 8px;font-size:11px;margin:2px;color:#475569}
+.page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px}
+.page-header h1{font-size:20px;font-weight:700;color:var(--text)}
+.page-header .subtitle{font-size:13px;color:var(--muted);margin-top:3px}
+.comment-box{background:#f8fafc;border:1px solid var(--border);border-radius:8px;
+             padding:12px 14px;margin-bottom:10px;font-size:13px}
+.comment-meta{font-size:11px;color:var(--muted);margin-bottom:5px;
+              display:flex;align-items:center;gap:6px}
+.empty-state{text-align:center;padding:48px 20px;color:var(--muted)}
+.empty-state .icon{font-size:36px;margin-bottom:12px;opacity:.5}
+.empty-state p{font-size:13px}
+.section-header{font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;
+                padding-bottom:10px;border-bottom:1px solid var(--border)}
+.info-row{display:flex;padding:8px 0;border-bottom:1px solid #f8fafc;font-size:13px}
+.info-label{width:40%;color:var(--muted);font-weight:500;flex-shrink:0}
+.info-value{color:var(--text);font-weight:500}
 """
 
 ICONS = {
-    "dashboard": "📊", "new":    "➕", "cases":   "📁",
-    "pipeline":  "🔄", "search": "🔍", "admin":   "⚙️",
-    "logout":    "→",  "loan":   "💰", "kyc":     "🛡️",
+    "dashboard": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
+    "new":       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>',
+    "cases":     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+    "pipeline":  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12H2"/><path d="M5 5l-3 7 3 7"/><path d="M19 5l3 7-3 7"/></svg>',
+    "search":    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    "admin":     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    "kyc":       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+    "logout":    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
 }
 
 
@@ -165,19 +248,22 @@ def _initials(name: str) -> str:
 # ── Shell ─────────────────────────────────────────────────────────────────────
 
 def _shell(title: str, content: str, active: str = "", user: dict = None, alert: str = "") -> str:
-    role   = (user or {}).get("role", "officer")
-    uname  = (user or {}).get("username", "")
-    init   = _initials((user or {}).get("username", "?").title())
-    is_mgr = role in ("manager", "admin")
+    role     = (user or {}).get("role", "officer")
+    uname    = (user or {}).get("username", "")
+    init     = _initials((user or {}).get("username", "?").title())
+    is_mgr   = role in ("manager", "admin")
+    role_colors = {"admin": "#7c3aed", "manager": "#2563eb", "officer": "#0891b2"}
+    rc       = role_colors.get(role, "#64748b")
 
     def nav(key, label, href, show=True):
         if not show: return ""
         cls = "nav-item active" if key == active else "nav-item"
-        return f'<a href="{href}" class="{cls}">{ICONS.get(key,"")} {label}</a>'
+        return f'<a href="{href}" class="{cls}">{ICONS.get(key,"")} <span>{label}</span></a>'
 
     sidebar = f"""
     <div class="sidebar">
       <div class="sidebar-logo">
+        <div class="logo-mark">L</div>
         <div class="title">Loan Management</div>
         <div class="sub">Officer Portal</div>
       </div>
@@ -186,21 +272,29 @@ def _shell(title: str, content: str, active: str = "", user: dict = None, alert:
         {nav("dashboard","Dashboard","/loan/")}
         {nav("new","New Application","/loan/new")}
         {nav("cases","All Cases","/loan/cases")}
-        {nav("pipeline","Pipeline View","/loan/pipeline")}
+        {nav("pipeline","Pipeline","/loan/pipeline")}
         <div class="nav-section">Tools</div>
-        {nav("search","Search Applicant","/loan/search")}
-        {nav("kyc","KYC Dashboard","/loan/kyc-dashboard")}
+        {nav("search","Search","/loan/search")}
+        {nav("kyc","KYC System","/loan/kyc-dashboard")}
         {nav("admin","Admin","/loan/admin",is_mgr)}
       </div>
       <div class="sidebar-user">
         <div style="display:flex;align-items:center;gap:10px">
           <div class="user-avatar">{init}</div>
           <div style="flex:1;min-width:0">
-            <div style="color:#e0f2fe;font-size:12px;font-weight:600;
+            <div style="color:#f1f5f9;font-size:12px;font-weight:600;
                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{uname}</div>
-            <div style="color:#7dd3fc;font-size:11px;text-transform:capitalize">{role}</div>
+            <div style="font-size:11px;margin-top:2px">
+              <span style="background:{rc}30;color:{rc.replace('eb','c5').replace('2563','93')};
+                    padding:1px 6px;border-radius:4px;font-weight:600;font-size:10px">
+                {role.upper()}
+              </span>
+            </div>
           </div>
-          <a href="/loan/logout" style="color:#7dd3fc;font-size:18px" title="Logout">⏏</a>
+          <a href="/loan/logout" title="Sign out"
+             style="color:#475569;display:flex;align-items:center;width:16px;height:16px">
+            {ICONS["logout"]}
+          </a>
         </div>
       </div>
     </div>"""
@@ -217,12 +311,16 @@ def _shell(title: str, content: str, active: str = "", user: dict = None, alert:
   {sidebar}
   <div class="main">
     <div class="topbar">
-      <div class="topbar-title">{title}</div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:12px;color:var(--muted)">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
-                background:#0284c7;margin-right:4px"></span>{role.title()}
-        </span>
+      <div class="topbar-left">
+        <div>
+          <div class="topbar-title">{title}</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div style="font-size:12px;color:var(--muted);padding:4px 10px;
+             background:var(--surface);border:1px solid var(--border);border-radius:6px">
+          {uname} · <span style="color:{rc};font-weight:600">{role.title()}</span>
+        </div>
         <a href="/loan/logout" class="btn btn-ghost btn-sm">Sign out</a>
       </div>
     </div>
@@ -295,43 +393,57 @@ def login_page(error: str = ""):
 <html><head><meta charset="utf-8"><title>Loan Portal — Sign In</title>
 <style>
 {CSS}
-body{{background:linear-gradient(135deg,#0c4a6e 0%,#0369a1 100%);
-     display:flex;align-items:center;justify-content:center;min-height:100vh}}
-.login-card{{background:#fff;border-radius:14px;padding:36px 32px;width:360px;
-             box-shadow:0 20px 60px rgba(0,0,0,.25)}}
-.login-logo{{text-align:center;margin-bottom:24px}}
-.icon-wrap{{width:52px;height:52px;background:#e0f2fe;border-radius:12px;
-            display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:22px}}
-h1{{font-size:18px;font-weight:700;color:#0c4a6e;margin-bottom:3px}}
-p{{color:#64748b;font-size:13px;margin-bottom:24px}}
-.btn-login{{width:100%;padding:10px;background:#0284c7;color:#fff;border:none;
-            border-radius:7px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px}}
-.btn-login:hover{{background:#0369a1}}
-.hint{{background:#f0f9ff;border-radius:6px;padding:10px 12px;font-size:11px;color:#6b7280;margin-top:14px}}
-.hint code{{color:#0284c7;font-weight:600}}
+body{{background:#0f172a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin-left:0}}
+.login-wrap{{width:100%;max-width:400px;padding:16px}}
+.login-card{{background:#fff;border-radius:16px;padding:36px 32px;
+             box-shadow:0 20px 60px rgba(0,0,0,.4)}}
+.login-header{{text-align:center;margin-bottom:28px}}
+.login-logo{{width:52px;height:52px;background:var(--accent);border-radius:12px;
+             display:flex;align-items:center;justify-content:center;
+             font-size:22px;font-weight:800;color:#fff;margin:0 auto 14px;
+             box-shadow:0 4px 14px rgba(37,99,235,.4)}}
+.login-header h1{{font-size:20px;font-weight:700;color:#0f172a;margin-bottom:4px}}
+.login-header p{{font-size:13px;color:var(--muted)}}
+.btn-login{{width:100%;padding:11px;background:var(--accent);color:#fff;border:none;
+            border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;
+            margin-top:6px;box-shadow:0 2px 8px rgba(37,99,235,.3);transition:all .15s}}
+.btn-login:hover{{background:var(--accent-h);box-shadow:0 4px 12px rgba(37,99,235,.4)}}
+.hint{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
+       padding:10px 14px;font-size:11px;color:var(--muted);margin-top:16px;line-height:1.8}}
+.hint code{{color:var(--accent);font-weight:600;background:#eff6ff;
+            padding:1px 5px;border-radius:3px}}
+.divider{{text-align:center;font-size:12px;color:var(--muted);
+          margin:16px 0;position:relative}}
+.divider:before{{content:'';position:absolute;top:50%;left:0;right:0;
+                 border-top:1px solid #e2e8f0}}
+.divider span{{background:#fff;padding:0 10px;position:relative}}
 </style></head>
 <body>
-<div class="login-card">
-  <div class="login-logo">
-    <div class="icon-wrap">💰</div>
-    <h1>Loan Portal</h1>
-    <p>Sign in to manage loan applications</p>
-  </div>
-  {err}
-  <form method="post" action="/loan/login">
-    <div class="form-group">
-      <label class="lbl">Username</label>
-      <input type="text" name="username" placeholder="Enter username" required autofocus>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-header">
+      <div class="login-logo">L</div>
+      <h1>Loan Officer Portal</h1>
+      <p>Sign in to manage loan applications</p>
     </div>
-    <div class="form-group">
-      <label class="lbl">Password</label>
-      <input type="password" name="password" placeholder="Enter password" required>
+    {err}
+    <form method="post" action="/loan/login">
+      <div class="form-group">
+        <label class="lbl">Username</label>
+        <input type="text" name="username" placeholder="Enter your username" required autofocus>
+      </div>
+      <div class="form-group">
+        <label class="lbl">Password</label>
+        <input type="password" name="password" placeholder="Enter your password" required>
+      </div>
+      <button type="submit" class="btn-login">Sign In</button>
+    </form>
+    <div class="divider"><span>default credentials</span></div>
+    <div class="hint">
+      Officer: <code>officer</code> / <code>officer123</code><br>
+      Manager: <code>manager</code> / <code>manager123</code><br>
+      Admin: <code>admin</code> / <code>admin123</code>
     </div>
-    <button type="submit" class="btn-login">Sign In</button>
-  </form>
-  <div class="hint">
-    Officer: <code>officer</code> / <code>officer123</code> &nbsp;·&nbsp;
-    Manager: <code>manager</code> / <code>manager123</code>
   </div>
 </div>
 </body></html>"""
@@ -386,30 +498,88 @@ def dashboard(request: Request):
     approved_vol = stats.get("approved_volume") or 0
 
     content = f"""
-    <div class="stats stats-4">
-      <div class="stat-card"><div class="stat-num">{stats.get("total",0)}</div><div class="stat-lbl">Total Applications (30d)</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">{stats.get("review",0)}</div><div class="stat-lbl">Pending Review</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#22c55e">{stats.get("approved",0)}</div><div class="stat-lbl">Approved</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#ef4444">{stats.get("rejected",0)}</div><div class="stat-lbl">Rejected</div></div>
-    </div>
-    <div class="stats stats-3">
-      <div class="stat-card"><div class="stat-num" style="color:#8b5cf6">{stats.get("screening",0)}</div><div class="stat-lbl">In KYC Screening</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#ef4444">{stats.get("high_risk",0)}</div><div class="stat-lbl">HIGH Risk Flagged</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#22c55e">${float(approved_vol):,.0f}</div><div class="stat-lbl">Approved Volume (30d)</div></div>
+    <div class="page-header">
+      <div>
+        <h1>Dashboard</h1>
+        <div class="subtitle">Loan application overview — last 30 days</div>
+      </div>
+      <a href="/loan/new" class="btn btn-primary btn-lg">+ New Application</a>
     </div>
 
-    <div style="display:flex;gap:10px;margin-bottom:16px">
-      <a href="/loan/new" class="btn btn-primary">+ New Application</a>
+    <div class="stats stats-4">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#eff6ff">
+          <span style="font-size:16px">📋</span>
+        </div>
+        <div class="stat-num">{stats.get("total",0)}</div>
+        <div class="stat-lbl">Total Applications</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#fffbeb">
+          <span style="font-size:16px">⏳</span>
+        </div>
+        <div class="stat-num" style="color:var(--warn)">{stats.get("review",0)}</div>
+        <div class="stat-lbl">Pending Review</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#f0fdf4">
+          <span style="font-size:16px">✓</span>
+        </div>
+        <div class="stat-num" style="color:var(--ok)">{stats.get("approved",0)}</div>
+        <div class="stat-lbl">Approved</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#fef2f2">
+          <span style="font-size:16px">✕</span>
+        </div>
+        <div class="stat-num" style="color:var(--danger)">{stats.get("rejected",0)}</div>
+        <div class="stat-lbl">Rejected</div>
+      </div>
+    </div>
+
+    <div class="stats stats-3">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#f5f3ff">
+          <span style="font-size:16px">🔍</span>
+        </div>
+        <div class="stat-num" style="color:#7c3aed">{stats.get("screening",0)}</div>
+        <div class="stat-lbl">In KYC Screening</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#fef2f2">
+          <span style="font-size:16px">⚠</span>
+        </div>
+        <div class="stat-num" style="color:var(--danger)">{stats.get("high_risk",0)}</div>
+        <div class="stat-lbl">HIGH Risk Flagged</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#f0fdf4">
+          <span style="font-size:16px">💰</span>
+        </div>
+        <div class="stat-num" style="color:var(--ok);font-size:20px">${float(approved_vol):,.0f}</div>
+        <div class="stat-lbl">Approved Volume</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-bottom:18px">
+      <a href="/loan/cases?status=review" class="btn btn-warn">
+        ⚠ Review Queue ({stats.get("review",0)})
+      </a>
       <a href="/loan/pipeline" class="btn btn-ghost">Pipeline View</a>
-      <a href="/loan/cases?status=review" class="btn btn-warn">⚠ Pending Review ({stats.get("review",0)})</a>
+      <a href="/loan/cases" class="btn btn-ghost">All Cases</a>
     </div>
 
     <div class="card">
-      <div class="card-title">Recent Applications</div>
-      <table>
-        <thead><tr><th>Ref</th><th>Applicant</th><th>Type</th><th>Amount</th><th>Status</th><th>KYC</th><th>Date</th><th></th></tr></thead>
-        <tbody>{rows or "<tr><td colspan='8' style='text-align:center;padding:20px;color:var(--muted)'>No applications yet</td></tr>"}</tbody>
-      </table>
+      <div class="card-header">
+        <div class="card-title">Recent Applications</div>
+        <a href="/loan/cases" class="btn btn-ghost btn-sm">View all</a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Reference</th><th>Applicant</th><th>Type</th><th>Amount</th><th>Status</th><th>KYC Result</th><th>Date</th><th></th></tr></thead>
+          <tbody>{rows or "<tr><td colspan='8' class='empty-state'><p>No applications yet</p></td></tr>"}</tbody>
+        </table>
+      </div>
     </div>"""
 
     return HTMLResponse(_shell("Dashboard", content, "dashboard", user))
