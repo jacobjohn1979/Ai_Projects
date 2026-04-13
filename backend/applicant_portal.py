@@ -1086,6 +1086,57 @@ async def submit_application(
                   {"rl":overall.get("risk_level"),"rs":overall.get("risk_score"),
                    "ra":overall.get("action"),"rf":json.dumps(overall.get("flags",[])),
                    "rr":json.dumps(res),"ref":loan_ref})
+
+            # ── Mirror to loan_applications so loan officers see it ────────────
+            try:
+                _exec("""
+                    INSERT INTO loan_applications
+                    (loan_ref, loan_type, loan_amount, loan_term_months, loan_purpose,
+                     applicant_id, applicant_name, applicant_phone, applicant_email,
+                     applicant_employer, applicant_income, applicant_address,
+                     docs_uploaded, kyc_status, kyc_risk_level, kyc_risk_score,
+                     kyc_action, kyc_flags, kyc_result, kyc_screened_at,
+                     status, created_by, submitted_at)
+                    VALUES
+                    (:ref, :lt, :la, :lterm, :lp,
+                     :aid, :name, :phone, :email,
+                     :employer, :income, :address,
+                     :docs, :ks, :krl, :krs,
+                     :kra, :kf, :kr, NOW(),
+                     'review', 'applicant-portal', NOW())
+                    ON CONFLICT (loan_ref) DO UPDATE SET
+                        kyc_status=EXCLUDED.kyc_status,
+                        kyc_risk_level=EXCLUDED.kyc_risk_level,
+                        kyc_risk_score=EXCLUDED.kyc_risk_score,
+                        kyc_action=EXCLUDED.kyc_action,
+                        kyc_result=EXCLUDED.kyc_result,
+                        kyc_screened_at=NOW(),
+                        status='review'
+                """, {
+                    "ref":      loan_ref,
+                    "lt":       loan_type,
+                    "la":       float(loan_amount or 0),
+                    "lterm":    int(loan_term or 12),
+                    "lp":       loan_purpose,
+                    "aid":      str(user["id"]),
+                    "name":     name,
+                    "phone":    "",
+                    "email":    "",
+                    "employer": employer,
+                    "income":   float(income or 0),
+                    "address":  address,
+                    "docs":     json.dumps(docs_uploaded),
+                    "ks":       "complete",
+                    "krl":      overall.get("risk_level"),
+                    "krs":      overall.get("risk_score"),
+                    "kra":      overall.get("action"),
+                    "kf":       json.dumps(overall.get("flags",[])),
+                    "kr":       json.dumps(res),
+                })
+                log.info(f"Mirrored {loan_ref} to loan_applications for loan officers")
+            except Exception as me:
+                log.warning(f"Mirror to loan_applications failed (non-fatal): {me}")
+
         else:
             _exec("UPDATE applicant_loans SET kyc_status='failed' WHERE loan_ref=:r",{"r":loan_ref})
     except Exception as e:
@@ -1199,7 +1250,7 @@ def case_status(loan_ref: str, request: Request):
 
     <div class="card">
       <div class="card-title">{t['upload_docs']}</div>
-      {''.join(f"<div style='padding:6px 0;border-bottom:1px solid #fef2f2;font-size:13px'>📄 {d}</div>" for d in (json.loads(loan['docs_uploaded'] if isinstance(loan.get('docs_uploaded'), list) else (json.loads(loan['docs_uploaded']) if loan.get('docs_uploaded') else [])) or "<p style='color:var(--muted);font-size:13px'>No documents uploaded yet</p>"}
+      {''.join(f"<div style='padding:6px 0;border-bottom:1px solid #fef2f2;font-size:13px'>📄 {d}</div>" for d in (json.loads(loan['docs_uploaded']) if loan.get('docs_uploaded') else [])) or "<p style='color:var(--muted);font-size:13px'>No documents uploaded yet</p>"}
     </div>"""
 
     return HTMLResponse(_shell(request, content, user=user))
