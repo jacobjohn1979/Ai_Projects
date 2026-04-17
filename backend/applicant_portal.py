@@ -28,7 +28,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@postgre
 engine       = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=5)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
-KYC_API_URL  = os.getenv("KYC_API_URL", "http://api:8001")
+KYC_API_URL  = os.getenv("KYC_API_URL", "http://loan-api:8004")
 SERVER_IP    = os.getenv("SERVER_IP", "172.16.26.48")
 SMS_ENABLED  = os.getenv("SMS_ENABLED", "false").lower() == "true"
 
@@ -1063,7 +1063,7 @@ async def submit_application(
               {"d":json.dumps(docs_uploaded),"r":loan_ref})
 
         async with httpx.AsyncClient(base_url=KYC_API_URL, timeout=120) as client:
-            r = await client.post("/api/v1/loan-case",
+            r = await client.post("/loan-case",
                 data={
                     "loan_ref":      loan_ref,
                     "applicant_id":  str(user["id"]),
@@ -1250,7 +1250,7 @@ def case_status(loan_ref: str, request: Request):
 
     <div class="card">
       <div class="card-title">{t['upload_docs']}</div>
-      {''.join(f"<div style='padding:6px 0;border-bottom:1px solid #fef2f2;font-size:13px'>📄 {d}</div>" for d in (json.loads(loan['docs_uploaded']) if loan.get('docs_uploaded') else [])) or "<p style='color:var(--muted);font-size:13px'>No documents uploaded yet</p>"}
+      {''.join("<div style='padding:6px 0;border-bottom:1px solid var(--border-light);font-size:13px'>📄 " + str(d) + "</div>" for d in (loan['docs_uploaded'] if isinstance(loan.get('docs_uploaded'), list) else (json.loads(loan['docs_uploaded']) if isinstance(loan.get('docs_uploaded'), str) else []))) or "<p style='color:var(--muted);font-size:13px'>No documents uploaded yet</p>"}
     </div>"""
 
     return HTMLResponse(_shell(request, content, user=user))
