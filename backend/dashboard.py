@@ -142,8 +142,6 @@ def api_velocity(days: int = 7):
 def dashboard():
     return HTMLResponse(HTML)
 
-HTML = open("/app/dashboard_template.html").read() if __import__("os").path.exists("/app/dashboard_template.html") else INLINE_HTML
-
 INLINE_HTML = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -473,3 +471,5 @@ loadAll();
 setInterval(loadAll,30000);
 </script>
 </body></html>"""
+
+HTML = INLINE_HTML
