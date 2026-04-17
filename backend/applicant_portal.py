@@ -28,7 +28,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@postgre
 engine       = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=5)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
-KYC_API_URL  = os.getenv("KYC_API_URL", "http://loan-api:8004")
+KYC_API_URL  = os.getenv("KYC_API_URL", "http://api:8001")
 SERVER_IP    = os.getenv("SERVER_IP", "172.16.26.48")
 SMS_ENABLED  = os.getenv("SMS_ENABLED", "false").lower() == "true"
 
@@ -1046,102 +1046,122 @@ async def submit_application(
     if action == "draft":
         return RedirectResponse(f"/apply/case/{loan_ref}", 303)
 
-    # Submit to KYC API
+    # ── Read all file data BEFORE redirecting ────────────────────────────────
+    files_data    = {}
+    docs_uploaded = []
+    for fname, upload in [("id_card", id_card), ("selfie", selfie),
+                           ("bank_statement", bank_statement),
+                           ("payslip", payslip), ("utility_bill", utility_bill)]:
+        if upload and upload.filename:
+            data = await upload.read()
+            if data:
+                files_data[fname] = (upload.filename, data,
+                                     upload.content_type or "application/octet-stream")
+                docs_uploaded.append(upload.filename)
+
+    _exec("""UPDATE applicant_loans SET
+             status='screening', submitted_at=NOW(), docs_uploaded=:d
+             WHERE loan_ref=:r""",
+          {"d": json.dumps(docs_uploaded), "r": loan_ref})
+
+    # ── Also create loan_applications record immediately (screening state) ──
     try:
-        files        = {}
-        docs_uploaded = []
-        for fname, upload in [("id_card",id_card),("selfie",selfie),
-                               ("bank_statement",bank_statement),
-                               ("payslip",payslip),("utility_bill",utility_bill)]:
-            if upload and upload.filename:
-                data = await upload.read()
-                if data:
-                    files[fname] = (upload.filename, data, upload.content_type or "application/octet-stream")
-                    docs_uploaded.append(upload.filename)
+        _exec("""
+            INSERT INTO loan_applications
+            (loan_ref, loan_type, loan_amount, loan_term_months, loan_purpose,
+             applicant_id, applicant_name, applicant_phone, applicant_email,
+             applicant_employer, applicant_income, applicant_address,
+             docs_uploaded, kyc_status, status, created_by, submitted_at)
+            VALUES
+            (:ref, :lt, :la, :lterm, :lp,
+             :aid, :name, '', '',
+             :employer, :income, :address,
+             :docs, 'screening', 'screening', 'applicant-portal', NOW())
+            ON CONFLICT (loan_ref) DO UPDATE SET
+                kyc_status='screening', status='screening'
+        """, {
+            "ref":      loan_ref,   "lt":  loan_type,
+            "la":       float(loan_amount or 0),
+            "lterm":    int(loan_term or 12),
+            "lp":       loan_purpose,
+            "aid":      str(user["id"]),
+            "name":     name,       "employer": employer,
+            "income":   float(income or 0),
+            "address":  address,
+            "docs":     json.dumps(docs_uploaded),
+        })
+    except Exception as me:
+        log.warning(f"Initial loan_applications insert failed: {me}")
 
-        _exec("UPDATE applicant_loans SET status='screening', submitted_at=NOW(), docs_uploaded=:d WHERE loan_ref=:r",
-              {"d":json.dumps(docs_uploaded),"r":loan_ref})
+    # ── Fire KYC in background — don't make customer wait ────────────────────
+    import asyncio
 
-        async with httpx.AsyncClient(base_url=KYC_API_URL, timeout=120) as client:
-            r = await client.post("/loan-case",
-                data={
-                    "loan_ref":      loan_ref,
-                    "applicant_id":  str(user["id"]),
-                    "applicant_name": name,
-                    "loan_type":     loan_type,
-                    "loan_amount":   loan_amount,
-                    "source_system": "ApplicantPortal",
-                    "callback_url":  f"http://applicant-portal:8006/webhook/kyc",
-                },
-                files=files or {"_x":("x.txt",b"x","text/plain")},
-            )
+    async def _run_kyc_background():
+        try:
+            async with httpx.AsyncClient(
+                base_url=KYC_API_URL, timeout=180
+            ) as client:
+                r = await client.post(
+                    "/loan-case",
+                    data={
+                        "loan_ref":       loan_ref,
+                        "applicant_id":   str(user["id"]),
+                        "applicant_name": name,
+                        "loan_type":      loan_type,
+                        "loan_amount":    loan_amount,
+                        "source_system":  "ApplicantPortal",
+                        "callback_url":   "http://applicant-portal:8006/webhook/kyc",
+                    },
+                    files=files_data or {"_x": ("x.txt", b"x", "text/plain")},
+                )
 
-        if r.status_code == 200:
-            res     = r.json()
-            overall = res.get("overall",{})
-            _exec("""UPDATE applicant_loans SET
-                     kyc_status='complete', kyc_risk_level=:rl, kyc_risk_score=:rs,
-                     kyc_action=:ra, kyc_flags=:rf, kyc_result=:rr, status='review'
-                     WHERE loan_ref=:ref""",
-                  {"rl":overall.get("risk_level"),"rs":overall.get("risk_score"),
-                   "ra":overall.get("action"),"rf":json.dumps(overall.get("flags",[])),
-                   "rr":json.dumps(res),"ref":loan_ref})
+            if r.status_code == 200:
+                res     = r.json()
+                overall = res.get("overall", {})
 
-            # ── Mirror to loan_applications so loan officers see it ────────────
-            try:
-                _exec("""
-                    INSERT INTO loan_applications
-                    (loan_ref, loan_type, loan_amount, loan_term_months, loan_purpose,
-                     applicant_id, applicant_name, applicant_phone, applicant_email,
-                     applicant_employer, applicant_income, applicant_address,
-                     docs_uploaded, kyc_status, kyc_risk_level, kyc_risk_score,
-                     kyc_action, kyc_flags, kyc_result, kyc_screened_at,
-                     status, created_by, submitted_at)
-                    VALUES
-                    (:ref, :lt, :la, :lterm, :lp,
-                     :aid, :name, :phone, :email,
-                     :employer, :income, :address,
-                     :docs, :ks, :krl, :krs,
-                     :kra, :kf, :kr, NOW(),
-                     'review', 'applicant-portal', NOW())
-                    ON CONFLICT (loan_ref) DO UPDATE SET
-                        kyc_status=EXCLUDED.kyc_status,
-                        kyc_risk_level=EXCLUDED.kyc_risk_level,
-                        kyc_risk_score=EXCLUDED.kyc_risk_score,
-                        kyc_action=EXCLUDED.kyc_action,
-                        kyc_result=EXCLUDED.kyc_result,
-                        kyc_screened_at=NOW(),
-                        status='review'
-                """, {
-                    "ref":      loan_ref,
-                    "lt":       loan_type,
-                    "la":       float(loan_amount or 0),
-                    "lterm":    int(loan_term or 12),
-                    "lp":       loan_purpose,
-                    "aid":      str(user["id"]),
-                    "name":     name,
-                    "phone":    "",
-                    "email":    "",
-                    "employer": employer,
-                    "income":   float(income or 0),
-                    "address":  address,
-                    "docs":     json.dumps(docs_uploaded),
-                    "ks":       "complete",
-                    "krl":      overall.get("risk_level"),
-                    "krs":      overall.get("risk_score"),
-                    "kra":      overall.get("action"),
-                    "kf":       json.dumps(overall.get("flags",[])),
-                    "kr":       json.dumps(res),
-                })
-                log.info(f"Mirrored {loan_ref} to loan_applications for loan officers")
-            except Exception as me:
-                log.warning(f"Mirror to loan_applications failed (non-fatal): {me}")
+                # Update applicant_loans
+                _exec("""UPDATE applicant_loans SET
+                         kyc_status='complete', kyc_risk_level=:rl,
+                         kyc_risk_score=:rs, kyc_action=:ra,
+                         kyc_flags=:rf, kyc_result=:rr, status='review'
+                         WHERE loan_ref=:ref""",
+                      {"rl": overall.get("risk_level"),
+                       "rs": overall.get("risk_score"),
+                       "ra": overall.get("action"),
+                       "rf": json.dumps(overall.get("flags", [])),
+                       "rr": json.dumps(res), "ref": loan_ref})
 
-        else:
-            _exec("UPDATE applicant_loans SET kyc_status='failed' WHERE loan_ref=:r",{"r":loan_ref})
-    except Exception as e:
-        log.error(f"KYC submit failed: {e}")
-        _exec("UPDATE applicant_loans SET kyc_status='failed' WHERE loan_ref=:r",{"r":loan_ref})
+                # Update loan_applications for loan officers
+                _exec("""UPDATE loan_applications SET
+                         kyc_status='complete', kyc_risk_level=:rl,
+                         kyc_risk_score=:rs, kyc_action=:ra,
+                         kyc_flags=:rf, kyc_result=:rr,
+                         kyc_screened_at=NOW(), status='review'
+                         WHERE loan_ref=:ref""",
+                      {"rl": overall.get("risk_level"),
+                       "rs": overall.get("risk_score"),
+                       "ra": overall.get("action"),
+                       "rf": json.dumps(overall.get("flags", [])),
+                       "rr": json.dumps(res), "ref": loan_ref})
+
+                log.info(f"KYC complete for {loan_ref} — {overall.get('risk_level')}")
+            else:
+                log.error(f"KYC API returned {r.status_code} for {loan_ref}")
+                _exec("""UPDATE applicant_loans SET kyc_status='failed'
+                         WHERE loan_ref=:r""", {"r": loan_ref})
+                _exec("""UPDATE loan_applications SET kyc_status='failed'
+                         WHERE loan_ref=:r""", {"r": loan_ref})
+
+        except Exception as e:
+            log.error(f"KYC background task failed for {loan_ref}: {e}")
+            _exec("UPDATE applicant_loans SET kyc_status='failed' WHERE loan_ref=:r",
+                  {"r": loan_ref})
+            _exec("UPDATE loan_applications SET kyc_status='failed' WHERE loan_ref=:r",
+                  {"r": loan_ref})
+
+    # Start background task and redirect immediately
+    asyncio.create_task(_run_kyc_background())
+    log.info(f"KYC screening started in background for {loan_ref}")
 
     return RedirectResponse(f"/apply/case/{loan_ref}", 303)
 
@@ -1250,7 +1270,7 @@ def case_status(loan_ref: str, request: Request):
 
     <div class="card">
       <div class="card-title">{t['upload_docs']}</div>
-      {''.join("<div style='padding:6px 0;border-bottom:1px solid var(--border-light);font-size:13px'>📄 " + str(d) + "</div>" for d in (loan['docs_uploaded'] if isinstance(loan.get('docs_uploaded'), list) else (json.loads(loan['docs_uploaded']) if isinstance(loan.get('docs_uploaded'), str) else []))) or "<p style='color:var(--muted);font-size:13px'>No documents uploaded yet</p>"}
+      {''.join(f"<div style='padding:6px 0;border-bottom:1px solid #fef2f2;font-size:13px'>📄 {d}</div>" for d in (json.loads(loan['docs_uploaded']) if loan.get('docs_uploaded') else [])) or "<p style='color:var(--muted);font-size:13px'>No documents uploaded yet</p>"}
     </div>"""
 
     return HTMLResponse(_shell(request, content, user=user))
