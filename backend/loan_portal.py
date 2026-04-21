@@ -1060,6 +1060,24 @@ async def decide_case(
         "interest_rate": float(interest_rate) if interest_rate else None,
     })
     add_comment(loan_ref, user["username"], f"Decision: {decision.upper()} — {notes}")
+
+    # ── Send SMS notification ─────────────────────────────────────────────────
+    try:
+        from sms_notifications import notify_status_change
+        loan = get_loan(loan_ref)
+        phone = (loan.get("applicant_phone") or "").strip()
+        if phone and new_status in ("approved","rejected","review"):
+            notify_status_change(
+                phone    = phone,
+                loan_ref = loan_ref,
+                status   = new_status,
+                lang     = "en",
+                amount   = float(loan.get("loan_amount") or 0),
+                notes    = notes,
+            )
+    except Exception as sms_err:
+        log.warning(f"SMS notification failed (non-fatal): {sms_err}")
+
     return RedirectResponse(f"/loan/case/{loan_ref}?msg=Decision+recorded", 303)
 
 

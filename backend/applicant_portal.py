@@ -1046,6 +1046,23 @@ async def submit_application(
     if action == "draft":
         return RedirectResponse(f"/apply/case/{loan_ref}", 303)
 
+    # ── SMS: application received ─────────────────────────────────────────────
+    try:
+        from sms_notifications import notify_status_change
+        from sqlalchemy import text as _text
+        _db = SessionLocal()
+        _row = _db.execute(_text("SELECT phone FROM applicants WHERE id=:id"),
+                           {"id": user["id"]}).fetchone()
+        _db.close()
+        _phone = _row.phone if _row else ""
+        if _phone:
+            notify_status_change(
+                phone=_phone, loan_ref=loan_ref,
+                status="submitted", lang=_lang(request)
+            )
+    except Exception as _se:
+        log.warning(f"SMS received notification failed: {_se}")
+
     # ── Read all file data BEFORE redirecting ────────────────────────────────
     files_data    = {}
     docs_uploaded = []
@@ -1145,6 +1162,27 @@ async def submit_application(
                        "rr": json.dumps(res), "ref": loan_ref})
 
                 log.info(f"KYC complete for {loan_ref} — {overall.get('risk_level')}")
+
+                # ── SMS: screening started → review ───────────────────────────
+                try:
+                    from sms_notifications import notify_status_change
+                    from sqlalchemy import text as _text2
+                    _db2 = SessionLocal()
+                    _row2 = _db2.execute(_text2(
+                        "SELECT phone FROM applicants WHERE id=:id"), {"id": user["id"]}
+                    ).fetchone()
+                    _db2.close()
+                    _phone2 = _row2.phone if _row2 else ""
+                    _action = overall.get("action","REVIEW")
+                    _status = "approved" if _action=="PASS" else ("rejected" if _action=="REJECT" else "review")
+                    if _phone2:
+                        notify_status_change(
+                            phone=_phone2, loan_ref=loan_ref,
+                            status=_status, lang=_lang(request),
+                            amount=float(loan_amount or 0),
+                        )
+                except Exception as _se2:
+                    log.warning(f"SMS KYC complete notification failed: {_se2}")
             else:
                 log.error(f"KYC API returned {r.status_code} for {loan_ref}")
                 _exec("""UPDATE applicant_loans SET kyc_status='failed'
