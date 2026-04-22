@@ -221,45 +221,42 @@ def _screen_document(file_path: Path, doc_type: str) -> dict:
 
     if doc_type in ("id_card","passport") and ext in IMAGE_EXTS:
         from screening import (
-            compute_ela, analyze_noise, analyze_regions,
-            detect_copy_move, analyze_hologram,
-            match_template, extract_id_fields,
-            score_id_card, check_velocity
+            perform_ela, noise_analysis, analyze_id_card_regions,
+            copy_move_detection, basic_image_forensics,
+            extract_id_card_fields, auto_rotate_id_card,
+            score_id_card, score_image
         )
-        import cv2, numpy as np
+        import cv2
 
         img = cv2.imread(str(file_path))
         if img is None:
             return {"error": "could_not_read_image", "flags": [], "risk": {"level":"LOW","score":0}}
 
-        # Rotate if portrait
-        h, w = img.shape[:2]
-        if h < w:
-            img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+        try: img = auto_rotate_id_card(img)
+        except: pass
 
-        ela_info   = compute_ela(img)
-        noise_info = analyze_noise(img)
-        region_info= analyze_regions(img)
-        cm_info    = detect_copy_move(img)
-        holo_info  = analyze_hologram(img)
-        tmpl_info  = match_template(img, str(file_path))
+        ela_info    = perform_ela(img)
+        noise_info  = noise_analysis(img)
+        region_info = analyze_id_card_regions(img)
+        cm_info     = copy_move_detection(img)
+        forensics   = basic_image_forensics(img, str(file_path))
 
-        try:    field_info = extract_id_fields(img)
+        try:    field_info = extract_id_card_fields(img)
         except: field_info = {}
 
-        velocity    = check_velocity(None, "train_" + hashlib.md5(
-                        str(file_path).encode()).hexdigest()[:8])
-        all_flags   = (ela_info.get("flags",[]) + noise_info.get("flags",[]) +
-                      region_info.get("flags",[]) + cm_info.get("flags",[]) +
-                      holo_info.get("flags",[]) + tmpl_info.get("flags",[]) +
-                      velocity["flags"])
+        all_flags = []
+        for d in [ela_info, noise_info, region_info, cm_info, forensics]:
+            if isinstance(d, dict):
+                all_flags.extend(d.get("flags", []))
 
-        risk_score, risk_level = score_id_card(all_flags)
+        try:    risk_score, risk_level = score_id_card(all_flags)
+        except: risk_score, risk_level = score_image(all_flags)
+
         return {
             "flags": all_flags, "field_info": field_info,
             "ela": ela_info, "noise_analysis": noise_info,
             "region_info": region_info, "copy_move": cm_info,
-            "hologram": holo_info, "template_match": tmpl_info,
+            "forensics": forensics,
             "risk": {"level": risk_level, "score": risk_score},
         }
 
@@ -271,13 +268,13 @@ def _screen_document(file_path: Path, doc_type: str) -> dict:
                 "risk": {"level": level, "score": score}}
 
     else:
-        from screening import compute_ela, analyze_noise, score_image
+        from screening import perform_ela, noise_analysis, score_image
         import cv2
         img = cv2.imread(str(file_path))
         if img is None:
-            return {"flags":[], "risk":{"level":"LOW","score":0}}
-        ela_info   = compute_ela(img)
-        noise_info = analyze_noise(img)
+            return {"flags":[],"risk":{"level":"LOW","score":0}}
+        ela_info   = perform_ela(img)
+        noise_info = noise_analysis(img)
         all_flags  = ela_info.get("flags",[]) + noise_info.get("flags",[])
         score, level = score_image(all_flags)
         return {"flags": all_flags, "ela": ela_info,

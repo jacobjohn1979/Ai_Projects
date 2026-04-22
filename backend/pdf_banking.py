@@ -77,11 +77,77 @@ def _parse_amount(s: str) -> float:
 
 
 def _extract_text(file_path: str) -> str:
-    """Extract full text from PDF."""
+    """
+    Extract full text from PDF.
+    Strategy:
+      1. Try PyMuPDF direct text extraction (fast, works on text-based PDFs)
+      2. If text is too short (<50 chars per page) — scanned PDF detected
+      3. Fall back to OCR via pytesseract on rendered page images
+    """
     try:
-        doc  = fitz.open(file_path)
-        text = "\n".join(page.get_text("text") for page in doc)
-        return text
+        doc        = fitz.open(file_path)
+        pages      = list(doc)
+        total_pages = len(pages)
+
+        # ── Try direct text extraction first ─────────────────────────────────
+        text_parts = []
+        for page in pages:
+            text_parts.append(page.get_text("text"))
+        direct_text = "\n".join(text_parts).strip()
+
+        # ── Check if it's a scanned PDF ───────────────────────────────────────
+        avg_chars = len(direct_text) / max(total_pages, 1)
+        if avg_chars >= 50:
+            return direct_text  # Text-based PDF — done
+
+        # ── Scanned PDF — fall back to OCR ───────────────────────────────────
+        log.info(f"Scanned PDF detected ({avg_chars:.0f} chars/page) — using OCR: {file_path}")
+
+        try:
+            import pytesseract
+            from PIL import Image
+            import io
+
+            tesseract_cmd = os.getenv("TESSERACT_CMD", "/usr/bin/tesseract")
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+            ocr_parts = []
+            # Process max 10 pages to keep it fast
+            for i, page in enumerate(pages[:10]):
+                try:
+                    # Render page at 200 DPI for good OCR accuracy
+                    mat  = fitz.Matrix(200/72, 200/72)
+                    pix  = page.get_pixmap(matrix=mat, alpha=False)
+                    img  = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+                    # OCR with Khmer + English
+                    page_text = pytesseract.image_to_string(
+                        img,
+                        lang="khm+eng",
+                        config="--psm 6 --oem 3",
+                    )
+                    if page_text.strip():
+                        ocr_parts.append(page_text)
+                except Exception as pe:
+                    log.debug(f"OCR page {i} failed: {pe}")
+                    continue
+
+            ocr_text = "\n".join(ocr_parts).strip()
+
+            if ocr_text:
+                log.info(f"OCR extracted {len(ocr_text)} chars from {total_pages} pages")
+                return ocr_text
+            else:
+                log.warning(f"OCR returned no text for {file_path}")
+                return direct_text  # Return whatever we had
+
+        except ImportError:
+            log.warning("pytesseract not available for OCR fallback — install pytesseract+Pillow")
+            return direct_text
+        except Exception as ocr_err:
+            log.warning(f"OCR fallback failed: {ocr_err}")
+            return direct_text
+
     except Exception as e:
         log.error(f"Text extraction failed: {e}")
         return ""
@@ -589,9 +655,9 @@ def check_account_consistency(text: str) -> tuple:
 
 def score_banking_pdf(flags: list) -> tuple:
     weights = {
-        # Balance
-        "balance_math_inconsistency":          35,
-        "large_balance_discrepancy":           20,
+        # Balance — 100% tampered in training set → boosted
+        "balance_math_inconsistency":          45,
+        "large_balance_discrepancy":           25,
         "no_balance_found":                     5,
         # Round numbers / Benford
         "benfords_law_violation":              30,
@@ -600,41 +666,44 @@ def score_banking_pdf(flags: list) -> tuple:
         "suspicious_round_number_prevalence":  25,
         "excessive_duplicate_amounts":         20,
         "repeated_transaction_amounts":        10,
-        # Transaction patterns
-        "structuring_near_10000":              30,
-        "structuring_near_5000":              20,
-        "structuring_near_3000":              15,
-        "structuring_near_1000":              10,
-        "high_daily_transaction_velocity":    15,
-        "unusually_large_single_transaction": 15,
-        "suspicious_date_gap":                15,
-        "statement_period_too_long":          10,
+        # Transaction patterns — boosted from training data
+        "structuring_near_10000":              40,  # 99.9% tampered
+        "structuring_near_5000":               30,
+        "structuring_near_3000":               20,
+        "structuring_near_1000":               15,
+        "high_daily_transaction_velocity":     15,
+        "unusually_large_single_transaction":  20,
+        "suspicious_date_gap":                 15,
+        "statement_period_too_long":           10,
+        # Dates — boosted: future_dates 100% tampered in training
+        "future_dates_detected":               45,
+        "date_sequence_irregular":             20,
+        "documents_older_than_2_years":        10,
+        "no_dates_found":                       5,
         # Payslip
-        "employer_name_missing":              15,
-        "suspiciously_low_deductions":        20,
-        "suspiciously_high_deductions":       20,
-        "no_tax_deductions_detected":         25,
-        "salary_is_round_number":             10,
-        "only_one_salary_figure":              5,
+        "employer_name_missing":               15,
+        "suspiciously_low_deductions":         20,
+        "suspiciously_high_deductions":        20,
+        "no_tax_deductions_detected":          25,
+        "salary_is_round_number":              10,
+        "only_one_salary_figure":               5,
         # Template
-        "template_shared_across_applicants":  35,
-        "template_used_by_multiple_applicants": 20,
+        "template_shared_across_applicants":   35,
+        "template_used_by_multiple_applicants":20,
         # Address
-        "no_address_found":                    5,
-        "po_box_address":                      8,
+        "no_address_found":                     5,
+        "po_box_address":                       8,
         # Income/loan
-        "loan_exceeds_10x_annual_income":     30,
-        "loan_exceeds_7x_annual_income":      20,
-        "loan_exceeds_5x_annual_income":      10,
-        "income_not_detectable":               5,
-        # Dates
-        "future_dates_detected":              25,
-        "date_sequence_irregular":            15,
-        "documents_older_than_2_years":       10,
-        "no_dates_found":                      5,
+        "loan_exceeds_10x_annual_income":      30,
+        "loan_exceeds_7x_annual_income":       20,
+        "loan_exceeds_5x_annual_income":       10,
+        "income_not_detectable":                5,
         # Account
-        "multiple_account_numbers_detected":  15,
-        "no_account_number_found":             5,
+        "multiple_account_numbers_detected":   15,
+        "no_account_number_found":              5,
+        # OCR
+        "pdf_text_extraction_failed":           0,  # not a fraud signal
+        "ocr_used":                             0,  # informational only
     }
     score = sum(weights.get(f.split(":")[0], 5) for f in flags)
     level = "HIGH" if score >= 50 else ("MEDIUM" if score >= 20 else "LOW")
@@ -662,7 +731,8 @@ def analyze_banking_pdf(
     if not text.strip():
         return info, ["pdf_text_extraction_failed"], 0, "LOW"
 
-    info["text_length"] = len(text)
+    info["text_length"]  = len(text)
+    info["ocr_used"]     = len(text) > 0 and "OCR" in log.name  # track if OCR was needed
 
     # ── Run all checks ────────────────────────────────────────────────────────
 

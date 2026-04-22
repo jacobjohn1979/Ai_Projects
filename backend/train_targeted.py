@@ -175,38 +175,46 @@ def _screen_image(file_path: str) -> dict:
     """Screen ID card / image through KYC engine."""
     import cv2
     from screening import (
-        compute_ela, analyze_noise, analyze_regions,
-        detect_copy_move, analyze_hologram,
-        match_template, score_id_card, check_velocity
+        perform_ela, noise_analysis, analyze_id_card_regions,
+        copy_move_detection, basic_image_forensics,
+        extract_id_card_fields, auto_rotate_id_card,
+        score_id_card, score_image
     )
     img = cv2.imread(file_path)
     if img is None:
         return {"flags":[], "risk":{"level":"LOW","score":0}, "error":"unreadable"}
 
-    # Auto-rotate portrait
-    h, w = img.shape[:2]
-    if h < w: img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    # Auto-rotate
+    try: img = auto_rotate_id_card(img)
+    except: pass
 
     try:
-        ela    = compute_ela(img)
-        noise  = analyze_noise(img)
-        region = analyze_regions(img)
-        cm     = detect_copy_move(img)
-        holo   = analyze_hologram(img)
-        tmpl   = match_template(img, file_path)
+        ela    = perform_ela(img)
+        noise  = noise_analysis(img)
+        region = analyze_id_card_regions(img)
+        cm     = copy_move_detection(img)
+        forensics = basic_image_forensics(img, file_path)
     except Exception as e:
         return {"flags":[],"risk":{"level":"LOW","score":0},"error":str(e)}
 
-    all_flags = (ela.get("flags",[]) + noise.get("flags",[]) +
-                 region.get("flags",[]) + cm.get("flags",[]) +
-                 holo.get("flags",[]) + tmpl.get("flags",[]))
+    all_flags = []
+    for d in [ela, noise, region, cm, forensics]:
+        if isinstance(d, dict):
+            all_flags.extend(d.get("flags", []))
 
-    score, level = score_id_card(all_flags)
+    # Try id_card scoring first, fall back to image scoring
+    try:
+        score, level = score_id_card(all_flags)
+    except Exception:
+        score, level = score_image(all_flags)
+
     return {
-        "flags": all_flags,
-        "ela": ela, "noise_analysis": noise,
-        "region_info": region, "copy_move": cm,
-        "hologram": holo, "template_match": tmpl,
+        "flags":    all_flags,
+        "ela":      ela,
+        "noise_analysis": noise,
+        "region_info":    region,
+        "copy_move":      cm,
+        "forensics":      forensics,
         "risk": {"level": level, "score": score},
     }
 
