@@ -765,6 +765,20 @@ async def submit_new_application(
     if action == "draft":
         return RedirectResponse(f"/loan/case/{loan.loan_ref}?msg=Saved+as+draft", 303)
 
+    # ── Telegram: new application from loan officer ───────────────────────────
+    try:
+        from telegram_alerts import alert_new_application
+        alert_new_application(
+            loan_ref       = loan.loan_ref,
+            applicant_name = applicant_name,
+            loan_type      = loan_type,
+            loan_amount    = loan_amount,
+            source         = f"loan-officer:{user['username']}",
+            applicant_id   = applicant_id,
+        )
+    except Exception as _te:
+        log.warning(f"Telegram new app alert failed: {_te}")
+
     # Submit to KYC API
     try:
         files = {}
@@ -1060,6 +1074,22 @@ async def decide_case(
         "interest_rate": float(interest_rate) if interest_rate else None,
     })
     add_comment(loan_ref, user["username"], f"Decision: {decision.upper()} — {notes}")
+
+    # ── Telegram: decision alert ─────────────────────────────────────────────
+    try:
+        from telegram_alerts import alert_decision
+        loan_data = get_loan(loan_ref)
+        alert_decision(
+            loan_ref       = loan_ref,
+            applicant_name = loan_data.get("applicant_name","") if loan_data else "",
+            decision       = decision,
+            officer        = user["username"],
+            notes          = notes,
+            loan_amount    = loan_data.get("loan_amount") if loan_data else None,
+            interest_rate  = interest_rate if interest_rate else None,
+        )
+    except Exception as _te:
+        log.warning(f"Telegram decision alert failed: {_te}")
 
     # ── Send SMS notification ─────────────────────────────────────────────────
     try:

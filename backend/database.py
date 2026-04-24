@@ -1,7 +1,5 @@
 """
 database.py — PostgreSQL via SQLAlchemy
-  - screening_logs  : audit trail for every screened document
-  - velocity_checks : detect duplicate / rapid re-submission of same ID
 """
 import os
 import logging
@@ -19,7 +17,7 @@ log = logging.getLogger("fraud_detect.db")
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:password@localhost:5432/fraud_detect",
+    "postgresql://postgres:password@localhost:5432/fraud_detect"
 )
 
 engine = create_engine(
@@ -32,43 +30,39 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
 
-# ── Models ─────────────────────────────────────────────────────────────────────
-
 class ScreeningLog(Base):
     __tablename__ = "screening_logs"
 
-    id = Column(Integer, primary_key=True, index=True)
-    file_name = Column(String(255))
-    file_sha256 = Column(String(64), index=True)
-    category = Column(String(50))   # pdf | image | id_card
-    doc_type = Column(String(50))
-    risk_score = Column(Integer)
-    risk_level = Column(String(10))   # LOW | MEDIUM | HIGH
-    flags = Column(JSON)
-    full_result = Column(JSON)
-    screened_at = Column(DateTime, default=datetime.utcnow, index=True)
-    id_number = Column(String(50), nullable=True, index=True)
+    id           = Column(Integer, primary_key=True, index=True)
+    file_name    = Column(String(255))
+    file_sha256  = Column(String(64), index=True)
+    category     = Column(String(50))
+    doc_type     = Column(String(50))
+    risk_score   = Column(Integer)
+    risk_level   = Column(String(10))
+    flags        = Column(JSON)
+    full_result  = Column(JSON)
+    screened_at  = Column(DateTime, default=datetime.utcnow, index=True)
+    id_number    = Column(String(50), nullable=True, index=True)
     applicant_id = Column(String(100), nullable=True, index=True)
 
 
 class VelocityEvent(Base):
     __tablename__ = "velocity_events"
 
-    id = Column(Integer, primary_key=True, index=True)
-    id_number = Column(String(50), index=True)
-    file_sha256 = Column(String(64), index=True)
+    id           = Column(Integer, primary_key=True, index=True)
+    id_number    = Column(String(50), index=True)
+    file_sha256  = Column(String(64), index=True)
     applicant_id = Column(String(100), nullable=True)
-    risk_level = Column(String(10))
+    risk_level   = Column(String(10))
     submitted_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
-# Composite indexes for velocity queries
-Index("ix_velocity_id_time", VelocityEvent.id_number, VelocityEvent.submitted_at)
+Index("ix_velocity_id_time",   VelocityEvent.id_number,   VelocityEvent.submitted_at)
 Index("ix_velocity_hash_time", VelocityEvent.file_sha256, VelocityEvent.submitted_at)
 
 
 def init_db():
-    """Create all tables if they don't exist."""
     try:
         Base.metadata.create_all(bind=engine)
         log.info("Database tables initialised")
@@ -84,8 +78,6 @@ def get_db() -> Session:
         db.close()
 
 
-# ── Screening log ──────────────────────────────────────────────────────────────
-
 def save_screening_log(
     result: dict,
     filename: str,
@@ -100,43 +92,54 @@ def save_screening_log(
             id_number = result.get("field_info", {}).get("id_number")
 
         # Support both flat and nested risk format
-        risk_obj = result.get("risk", {}) or {}
-        risk_level = risk_obj.get("level") or result.get("risk_level") or "UNKNOWN"
-        risk_score = risk_obj.get("score") or result.get("risk_score") or 0
+        _risk_obj   = result.get("risk", {}) or {}
+        _risk_level = (_risk_obj.get("level") or result.get("risk_level") or "UNKNOWN")
+        _risk_score = (_risk_obj.get("score") or result.get("risk_score") or 0)
 
         log_entry = ScreeningLog(
-            file_name=filename,
-            file_sha256=result.get("sha256"),
-            category=category,
-            doc_type=doc_type,
-            risk_score=risk_score,
-            risk_level=risk_level,
-            flags=result.get("flags", []),
-            full_result=result,
-            id_number=id_number,
-            applicant_id=applicant_id,
+            file_name    = filename,
+            file_sha256  = result.get("sha256"),
+            category     = category,
+            doc_type     = doc_type,
+            risk_score   = _risk_score,
+            risk_level   = _risk_level,
+            flags        = result.get("flags", []),
+            full_result  = result,
+            id_number    = id_number,
+            applicant_id = applicant_id,
         )
         db.add(log_entry)
 
-        # also record velocity event for ID cards
         if id_number:
             ev = VelocityEvent(
-                id_number=id_number,
-                file_sha256=result.get("sha256"),
-                applicant_id=applicant_id,
-                risk_level=risk_level,
+                id_number    = id_number,
+                file_sha256  = result.get("sha256"),
+                applicant_id = applicant_id,
+                risk_level   = _risk_level,
             )
             db.add(ev)
 
         db.commit()
 
-        # ── Fire HIGH risk email alert ─────────────────────────────────────
-        if risk_level == "HIGH":
+        if _risk_level == "HIGH":
             try:
                 from alerts import send_high_risk_alert
                 send_high_risk_alert(result, filename, applicant_id)
             except Exception as ae:
                 log.warning(f"Alert send failed (non-fatal): {ae}")
+
+            # ── Telegram HIGH risk alert ───────────────────────────────────────
+            try:
+                from telegram_alerts import alert_high_risk_kyc
+                alert_high_risk_kyc(
+                    file_name    = filename,
+                    applicant_id = applicant_id or "",
+                    risk_score   = _risk_score,
+                    flags        = result.get("flags", []),
+                    doc_type     = doc_type,
+                )
+            except Exception as _te:
+                log.warning(f"Telegram HIGH risk alert failed: {_te}")
 
     except Exception as e:
         db.rollback()
@@ -145,25 +148,18 @@ def save_screening_log(
         db.close()
 
 
-# ── Velocity checks ────────────────────────────────────────────────────────────
-
-VELOCITY_WINDOW_HOURS = int(os.getenv("VELOCITY_WINDOW_HOURS", "24"))
-MAX_SUBMISSIONS_PER_ID = int(os.getenv("MAX_SUBMISSIONS_PER_ID", "3"))
+VELOCITY_WINDOW_HOURS     = int(os.getenv("VELOCITY_WINDOW_HOURS", "24"))
+MAX_SUBMISSIONS_PER_ID    = int(os.getenv("MAX_SUBMISSIONS_PER_ID", "3"))
 MAX_SAME_FILE_SUBMISSIONS = int(os.getenv("MAX_SAME_FILE_SUBMISSIONS", "2"))
 
 
 def check_velocity(id_number: str | None, file_sha256: str) -> dict:
-    """
-    Returns velocity flags and counts for a given ID number / file hash.
-    Call this BEFORE saving the new screening log.
-    """
-    flags = []
+    flags  = []
     counts = {}
-    db = SessionLocal()
+    db     = SessionLocal()
     window_start = datetime.utcnow() - timedelta(hours=VELOCITY_WINDOW_HOURS)
 
     try:
-        # ── 1. Same file hash submitted before (exact duplicate) ────────────
         hash_count = (
             db.query(func.count(VelocityEvent.id))
             .filter(
@@ -176,7 +172,6 @@ def check_velocity(id_number: str | None, file_sha256: str) -> dict:
         if hash_count >= MAX_SAME_FILE_SUBMISSIONS:
             flags.append("duplicate_file_resubmission")
 
-        # ── 2. Same ID number submitted too many times ───────────────────────
         if id_number:
             id_count = (
                 db.query(func.count(VelocityEvent.id))
@@ -190,7 +185,6 @@ def check_velocity(id_number: str | None, file_sha256: str) -> dict:
             if id_count >= MAX_SUBMISSIONS_PER_ID:
                 flags.append("id_number_velocity_breach")
 
-            # ── 3. Same ID previously flagged HIGH risk ──────────────────────
             prior_high = (
                 db.query(func.count(VelocityEvent.id))
                 .filter(
@@ -213,7 +207,6 @@ def check_velocity(id_number: str | None, file_sha256: str) -> dict:
 
 
 def get_submission_history(id_number: str, limit: int = 20) -> list[dict]:
-    """Return recent screening history for a given ID number."""
     db = SessionLocal()
     try:
         rows = (
@@ -226,10 +219,10 @@ def get_submission_history(id_number: str, limit: int = 20) -> list[dict]:
         return [
             {
                 "screened_at": r.screened_at.isoformat(),
-                "risk_level": r.risk_level,
-                "risk_score": r.risk_score,
-                "flags": r.flags,
-                "file_name": r.file_name,
+                "risk_level":  r.risk_level,
+                "risk_score":  r.risk_score,
+                "flags":       r.flags,
+                "file_name":   r.file_name,
             }
             for r in rows
         ]

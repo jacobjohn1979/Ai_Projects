@@ -1046,6 +1046,20 @@ async def submit_application(
     if action == "draft":
         return RedirectResponse(f"/apply/case/{loan_ref}", 303)
 
+    # ── Telegram: new application alert ────────────────────────────────────────
+    try:
+        from telegram_alerts import alert_new_application
+        alert_new_application(
+            loan_ref       = loan_ref,
+            applicant_name = name,
+            loan_type      = loan_type,
+            loan_amount    = loan_amount,
+            source         = "applicant-portal",
+            applicant_id   = str(user["id"]),
+        )
+    except Exception as _te:
+        log.warning(f"Telegram alert failed (non-fatal): {_te}")
+
     # ── SMS: application received ─────────────────────────────────────────────
     try:
         from sms_notifications import notify_status_change
@@ -1162,6 +1176,21 @@ async def submit_application(
                        "rr": json.dumps(res), "ref": loan_ref})
 
                 log.info(f"KYC complete for {loan_ref} — {overall.get('risk_level')}")
+
+                # ── Telegram: KYC complete alert ───────────────────────────────
+                try:
+                    from telegram_alerts import alert_kyc_complete
+                    alert_kyc_complete(
+                        loan_ref       = loan_ref,
+                        applicant_name = name,
+                        risk_level     = overall.get("risk_level","LOW"),
+                        risk_score     = overall.get("risk_score",0),
+                        action         = overall.get("action","REVIEW"),
+                        flags          = overall.get("flags",[]),
+                        loan_amount    = loan_amount,
+                    )
+                except Exception as _te2:
+                    log.warning(f"Telegram KYC alert failed: {_te2}")
 
                 # ── SMS: screening started → review ───────────────────────────
                 try:
