@@ -22,6 +22,7 @@ import logging
 import urllib.request
 import urllib.parse
 import urllib.error
+import ssl
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -35,6 +36,24 @@ BANK_NAME = os.getenv("BANK_NAME", "Bank")
 SERVER_IP = os.getenv("SERVER_IP", "172.16.26.48")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+
+def _ssl_context():
+    """Get SSL context — tries certifi first, then system certs, then unverified."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+    try:
+        ctx = ssl.create_default_context()
+        ctx.load_verify_locations("/etc/ssl/certs/ca-certificates.crt")
+        return ctx
+    except Exception:
+        pass
+    ctx = ssl._create_unverified_context()
+    log.warning("SSL verification disabled — run: pip install certifi --break-system-packages")
+    return ctx
 
 
 # ── Core sender ───────────────────────────────────────────────────────────────
@@ -66,7 +85,7 @@ def _send(message: str, chat_id: str = None, parse_mode: str = "HTML") -> dict:
             headers = {"Content-Type": "application/json"},
         )
 
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_ssl_context()) as resp:
             result = json.loads(resp.read())
             if result.get("ok"):
                 log.info(f"Telegram alert sent — message_id={result['result']['message_id']}")
