@@ -1046,6 +1046,13 @@ async def submit_application(
     if action == "draft":
         return RedirectResponse(f"/apply/case/{loan_ref}", 303)
 
+    # ── Notify applicant: application received ──────────────────────────────────
+    try:
+        from applicant_notifications import notify_by_ref
+        notify_by_ref(loan_ref, "submitted")
+    except Exception as _ne:
+        log.warning(f"Applicant notification failed: {_ne}")
+
     # ── Telegram: new application alert ────────────────────────────────────────
     try:
         from telegram_alerts import alert_new_application
@@ -1176,6 +1183,15 @@ async def submit_application(
                        "rr": json.dumps(res), "ref": loan_ref})
 
                 log.info(f"KYC complete for {loan_ref} — {overall.get('risk_level')}")
+
+                # ── Notify applicant: screening complete ───────────────────────
+                try:
+                    from applicant_notifications import notify_by_ref
+                    _action = overall.get("action","REVIEW")
+                    _notif_status = "approved" if _action=="PASS" else                                     "rejected" if _action=="REJECT" else "review"
+                    notify_by_ref(loan_ref, _notif_status)
+                except Exception as _ne:
+                    log.warning(f"Applicant KYC notification failed: {_ne}")
 
                 # ── Telegram: KYC complete alert ───────────────────────────────
                 try:

@@ -1075,6 +1075,18 @@ async def decide_case(
     })
     add_comment(loan_ref, user["username"], f"Decision: {decision.upper()} — {notes}")
 
+    # ── Notify applicant: loan decision ──────────────────────────────────────
+    try:
+        from applicant_notifications import notify_by_ref
+        notify_by_ref(
+            loan_ref      = loan_ref,
+            status        = new_status,
+            notes         = notes,
+            interest_rate = interest_rate if interest_rate else None,
+        )
+    except Exception as _ne:
+        log.warning(f"Applicant decision notification failed: {_ne}")
+
     # ── Telegram: decision alert ─────────────────────────────────────────────
     try:
         from telegram_alerts import alert_decision
