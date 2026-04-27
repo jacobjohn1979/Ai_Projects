@@ -408,55 +408,74 @@ def _gen_ref():
 def _send_otp(phone: str, otp: str):
     """
     Send OTP via multiple channels:
-    1. Telegram — if applicant has linked their account
-    2. Email    — if SMTP configured
+    1. Telegram — if applicant has linked their account via the bot
+    2. Email    — if SMTP configured and email found for this phone
     3. SMS      — if Twilio enabled
-    4. DEV_MODE — show in response
+    4. DEV_MODE — always show in response
     """
     log.info(f"OTP for {phone}: {otp}")
     sent = False
 
-    # ── Try Telegram first (works without SMS) ────────────────────────────────
+    # ── Try Telegram first ────────────────────────────────────────────────────
     try:
         db  = SessionLocal()
+        # Direct lookup — telegram_chat_id stored on applicant record
         row = db.execute(text("""
-            SELECT at.chat_id FROM applicant_telegram at
-            JOIN applicants a ON a.phone=:p
-            JOIN applicant_loans al ON al.applicant_id=a.id
-            WHERE at.loan_ref=al.loan_ref
+            SELECT telegram_chat_id FROM applicants
+            WHERE phone = :p AND telegram_chat_id IS NOT NULL
             LIMIT 1
         """), {"p": phone}).fetchone()
-        db.close()
 
-        if row and row[0]:
-            import json as _json, subprocess, tempfile
+        # Fallback — look up via applicant_telegram table
+        if not row or not row[0]:
+            row = db.execute(text("""
+                SELECT at.chat_id
+                FROM applicant_telegram at
+                JOIN applicant_loans al ON al.loan_ref = at.loan_ref
+                JOIN applicants a ON a.id = al.applicant_id
+                WHERE a.phone = :p
+                LIMIT 1
+            """), {"p": phone}).fetchone()
+
+        db.close()
+        chat_id_tg = row[0] if row else None
+
+        if chat_id_tg:
+            import json as _json
+            import urllib.request
+            import ssl as _ssl
             bot_token = os.getenv("TELEGRAM_BOT_TOKEN","")
             msg = (
-                f"🔐 <b>Your Verification Code</b>\n\n"
-                f"<code style='font-size:24px'>{otp}</code>\n\n"
+                f"🔐 <b>Your Login Code</b>\n\n"
+                f"<b><code>{otp}</code></b>\n\n"
                 f"Valid for 10 minutes.\n"
-                f"Do not share this code."
+                f"Do not share this code with anyone."
             )
-            payload = _json.dumps({
-                "chat_id": row[0], "text": msg,
-                "parse_mode": "HTML"
-            })
-            with tempfile.NamedTemporaryFile(
-                    mode='w', suffix='.json', delete=False) as f:
-                f.write(payload); tmp = f.name
-            subprocess.run([
-                "curl","-sk","-X","POST",
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                "-H","Content-Type: application/json",
-                "-d",f"@{tmp}",
-            ], capture_output=True, timeout=15)
-            os.unlink(tmp)
-            log.info(f"OTP sent via Telegram to {row[0]}")
-            sent = True
+            try:
+                data = _json.dumps({
+                    "chat_id":    chat_id_tg,
+                    "text":       msg,
+                    "parse_mode": "HTML",
+                }).encode()
+                ctx = _ssl._create_unverified_context()
+                req = urllib.request.Request(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    data=data, method="POST",
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
+                    result = _json.loads(r.read())
+                    if result.get("ok"):
+                        log.info(f"OTP sent via Telegram to {chat_id_tg}")
+                        sent = True
+                    else:
+                        log.warning(f"Telegram OTP failed: {result}")
+            except Exception as te:
+                log.warning(f"Telegram OTP send failed: {te}")
     except Exception as e:
-        log.warning(f"Telegram OTP failed: {e}")
+        log.warning(f"Telegram OTP lookup failed: {e}")
 
-    # ── Try email (look up email from phone) ──────────────────────────────────
+    # ── Try Email ─────────────────────────────────────────────────────────────
     smtp_user = os.getenv("SMTP_USER","")
     smtp_pw   = os.getenv("SMTP_PASSWORD","")
     smtp_host = os.getenv("SMTP_HOST","smtp.gmail.com")
@@ -476,7 +495,7 @@ def _send_otp(phone: str, otp: str):
                 from email.mime.text import MIMEText
                 from email.mime.multipart import MIMEMultipart
                 msg = MIMEMultipart("alternative")
-                msg["Subject"] = f"{bank_name} — Your Verification Code"
+                msg["Subject"] = f"{bank_name} — Verification Code: {otp}"
                 msg["From"]    = smtp_user
                 msg["To"]      = row[0]
                 body = (
@@ -488,12 +507,13 @@ def _send_otp(phone: str, otp: str):
                     f"<div style='font-family:Arial;max-width:400px;margin:20px auto;"
                     f"padding:24px;background:#f8fafc;border-radius:12px'>"
                     f"<h2 style='color:#1a2744'>{bank_name}</h2>"
-                    f"<p>Your verification code is:</p>"
-                    f"<div style='font-size:32px;font-weight:700;letter-spacing:8px;"
-                    f"color:#1e6fbc;background:#fff;padding:16px;border-radius:8px;"
-                    f"text-align:center;margin:16px 0'>{otp}</div>"
+                    f"<p style='color:#374151'>Your login verification code:</p>"
+                    f"<div style='font-size:36px;font-weight:700;letter-spacing:10px;"
+                    f"color:#1e6fbc;background:#fff;padding:20px;border-radius:8px;"
+                    f"text-align:center;margin:16px 0;border:2px solid #c7ddf5'>"
+                    f"{otp}</div>"
                     f"<p style='color:#64748b;font-size:13px'>"
-                    f"Valid for 10 minutes. Do not share this code.</p>"
+                    f"Valid for 10 minutes. Do not share.</p>"
                     f"</div>"
                 )
                 msg.attach(MIMEText(body,"plain"))
@@ -508,11 +528,13 @@ def _send_otp(phone: str, otp: str):
             log.warning(f"Email OTP failed: {e}")
 
     # ── Try SMS ───────────────────────────────────────────────────────────────
-    if SMS_ENABLED and not sent:
+    if SMS_ENABLED:
         try:
             from sms_notifications import send_otp as sms_otp
             result = sms_otp(phone, otp)
-            if result.get("success"): sent = True
+            if result.get("success"):
+                log.info(f"OTP sent via SMS to {phone}")
+                sent = True
         except Exception as e:
             log.warning(f"SMS OTP failed: {e}")
 
