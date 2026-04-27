@@ -406,10 +406,116 @@ def _gen_ref():
 
 
 def _send_otp(phone: str, otp: str):
-    """Send OTP via SMS. Replace with your SMS provider."""
-    log.info(f"OTP for {phone}: {otp}")  # In production: call Twilio/SMS gateway
-    if SMS_ENABLED:
-        pass  # add SMS provider call here
+    """
+    Send OTP via multiple channels:
+    1. Telegram — if applicant has linked their account
+    2. Email    — if SMTP configured
+    3. SMS      — if Twilio enabled
+    4. DEV_MODE — show in response
+    """
+    log.info(f"OTP for {phone}: {otp}")
+    sent = False
+
+    # ── Try Telegram first (works without SMS) ────────────────────────────────
+    try:
+        db  = SessionLocal()
+        row = db.execute(text("""
+            SELECT at.chat_id FROM applicant_telegram at
+            JOIN applicants a ON a.phone=:p
+            JOIN applicant_loans al ON al.applicant_id=a.id
+            WHERE at.loan_ref=al.loan_ref
+            LIMIT 1
+        """), {"p": phone}).fetchone()
+        db.close()
+
+        if row and row[0]:
+            import json as _json, subprocess, tempfile
+            bot_token = os.getenv("TELEGRAM_BOT_TOKEN","")
+            msg = (
+                f"🔐 <b>Your Verification Code</b>\n\n"
+                f"<code style='font-size:24px'>{otp}</code>\n\n"
+                f"Valid for 10 minutes.\n"
+                f"Do not share this code."
+            )
+            payload = _json.dumps({
+                "chat_id": row[0], "text": msg,
+                "parse_mode": "HTML"
+            })
+            with tempfile.NamedTemporaryFile(
+                    mode='w', suffix='.json', delete=False) as f:
+                f.write(payload); tmp = f.name
+            subprocess.run([
+                "curl","-sk","-X","POST",
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                "-H","Content-Type: application/json",
+                "-d",f"@{tmp}",
+            ], capture_output=True, timeout=15)
+            os.unlink(tmp)
+            log.info(f"OTP sent via Telegram to {row[0]}")
+            sent = True
+    except Exception as e:
+        log.warning(f"Telegram OTP failed: {e}")
+
+    # ── Try email (look up email from phone) ──────────────────────────────────
+    smtp_user = os.getenv("SMTP_USER","")
+    smtp_pw   = os.getenv("SMTP_PASSWORD","")
+    smtp_host = os.getenv("SMTP_HOST","smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT",587))
+    bank_name = os.getenv("BANK_NAME","Bank")
+
+    if smtp_user and smtp_pw:
+        try:
+            db  = SessionLocal()
+            row = db.execute(text(
+                "SELECT email FROM applicants WHERE phone=:p AND email IS NOT NULL"
+            ), {"p": phone}).fetchone()
+            db.close()
+
+            if row and row[0]:
+                import smtplib
+                from email.mime.text import MIMEText
+                from email.mime.multipart import MIMEMultipart
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = f"{bank_name} — Your Verification Code"
+                msg["From"]    = smtp_user
+                msg["To"]      = row[0]
+                body = (
+                    f"Your verification code is:\n\n"
+                    f"    {otp}\n\n"
+                    f"Valid for 10 minutes. Do not share this code."
+                )
+                html = (
+                    f"<div style='font-family:Arial;max-width:400px;margin:20px auto;"
+                    f"padding:24px;background:#f8fafc;border-radius:12px'>"
+                    f"<h2 style='color:#1a2744'>{bank_name}</h2>"
+                    f"<p>Your verification code is:</p>"
+                    f"<div style='font-size:32px;font-weight:700;letter-spacing:8px;"
+                    f"color:#1e6fbc;background:#fff;padding:16px;border-radius:8px;"
+                    f"text-align:center;margin:16px 0'>{otp}</div>"
+                    f"<p style='color:#64748b;font-size:13px'>"
+                    f"Valid for 10 minutes. Do not share this code.</p>"
+                    f"</div>"
+                )
+                msg.attach(MIMEText(body,"plain"))
+                msg.attach(MIMEText(html,"html"))
+                with smtplib.SMTP(smtp_host, smtp_port) as s:
+                    s.ehlo(); s.starttls()
+                    s.login(smtp_user, smtp_pw)
+                    s.sendmail(smtp_user, [row[0]], msg.as_string())
+                log.info(f"OTP sent via email to {row[0]}")
+                sent = True
+        except Exception as e:
+            log.warning(f"Email OTP failed: {e}")
+
+    # ── Try SMS ───────────────────────────────────────────────────────────────
+    if SMS_ENABLED and not sent:
+        try:
+            from sms_notifications import send_otp as sms_otp
+            result = sms_otp(phone, otp)
+            if result.get("success"): sent = True
+        except Exception as e:
+            log.warning(f"SMS OTP failed: {e}")
+
     return True
 
 
@@ -603,7 +709,9 @@ def login_page(request: Request, error: str = "", tab: str = "phone"):
           <label class="lbl">{t['otp']}</label>
           <input type="text" id="otp-input" placeholder="000000" maxlength="6"
                  style="letter-spacing:10px;font-size:22px;text-align:center;font-weight:700">
-          <div class="field-hint">Enter the 6-digit code sent to your phone</div>
+          <div class="field-hint">
+            Code sent via Telegram / Email / SMS · Valid 10 minutes
+          </div>
         </div>
         <div id="otp-msg"></div>
         <button class="btn btn-primary" onclick="verifyOTP()"
@@ -706,7 +814,10 @@ async def send_otp(request: Request, phone: str = Form("")):
 
     # In dev mode show OTP in response for testing
     dev_mode = os.getenv("DEV_MODE", "true").lower() == "true"
-    msg = f"Code sent to {phone}." + (f" [DEV: {otp}]" if dev_mode else "")
+    if dev_mode:
+        msg = f"Code sent to {phone}. [DEV: {otp}] — also check Telegram/Email"
+    else:
+        msg = f"Code sent via Telegram/Email/SMS to {phone}"
     return {"sent": True, "message": msg}
 
 
