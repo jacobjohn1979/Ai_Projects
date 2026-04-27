@@ -470,6 +470,7 @@ def _shell(request: Request, content: str, title_key: str = "title",
         nav = f"""
         <a href="/apply/" class="nav-link">{t['dashboard']}</a>
         <a href="/apply/new" class="nav-link">{t['new_app']}</a>
+        <a href="/apply/profile" class="nav-link">👤 Profile</a>
         <a href="/apply/logout" class="nav-link">{t['logout']}</a>"""
 
     return f"""<!DOCTYPE html>
@@ -764,8 +765,9 @@ def register_page(request: Request, error: str = ""):
             <input type="email" name="email" required>
           </div>
           <div class="form-group">
-            <label class="lbl">{t['phone']}</label>
-            <input type="tel" name="phone" placeholder="+855 xx xxx xxx">
+            <label class="lbl">{t['phone']} *</label>
+            <input type="tel" name="phone" placeholder="+855 xx xxx xxx" required>
+            <div class="field-hint">For SMS status updates</div>
           </div>
         </div>
         <div class="form-group">
@@ -809,7 +811,124 @@ async def register(request: Request,
         db.close()
 
 
-@app.post("/login-email")
+@app.get("/profile", response_class=HTMLResponse)
+def profile_page(request: Request, msg: str = ""):
+    user = _guard(request)
+    t    = T.get(_lang(request), T["en"])
+    info = _q("SELECT * FROM applicants WHERE id=:id", {"id": user["id"]})
+    a    = info[0] if info else {}
+
+    alert = ""
+    if msg == "saved":
+        alert = _alert("Profile updated successfully — SMS and email notifications are now active.", "ok")
+    elif msg == "error":
+        alert = _alert("Could not save — please try again.", "err")
+
+    content = f"""
+    {alert}
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+      <a href="/apply/" style="color:var(--muted);font-size:13px">← {t['dashboard']}</a>
+    </div>
+    <div class="card">
+      <div class="card-title">👤 My Profile</div>
+      <div class="alert alert-info">
+        <span>ℹ</span>
+        <span>Add your phone number and email to receive SMS and email
+        notifications when your loan status changes.</span>
+      </div>
+      <form method="post" action="/apply/profile">
+        <div class="form-group">
+          <label class="lbl">{t['name']}</label>
+          <input type="text" name="name" value="{a.get('name','') or ''}" required>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="lbl">{t['phone']} — for SMS updates</label>
+            <input type="tel" name="phone"
+                   value="{a.get('phone','') or ''}"
+                   placeholder="+855 xx xxx xxx">
+            <div class="field-hint">
+              {'✓ Phone saved — SMS active' if a.get('phone') else '⚠ Add phone to receive SMS updates'}
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="lbl">{t['email']} — for email updates</label>
+            <input type="email" name="email"
+                   value="{a.get('email','') or ''}">
+            <div class="field-hint">
+              {'✓ Email saved — email active' if a.get('email') else '⚠ Add email to receive email updates'}
+            </div>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="lbl">{t['dob']}</label>
+            <input type="date" name="dob" value="{a.get('dob','') or ''}">
+          </div>
+          <div class="form-group">
+            <label class="lbl">{t['employer']}</label>
+            <input type="text" name="employer"
+                   value="{a.get('employer','') or ''}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="lbl">{t['address']}</label>
+          <textarea name="address" rows="2">{a.get('address','') or ''}</textarea>
+        </div>
+
+        <div class="card" style="background:var(--primary-light);margin-top:8px">
+          <div class="card-title">💬 Telegram Updates</div>
+          <p style="font-size:13px;color:var(--muted);margin-bottom:10px">
+            Get instant Telegram messages when your loan status changes.
+          </p>
+          <p style="font-size:13px;line-height:1.8">
+            1. Open Telegram → search <strong>@{os.getenv('TELEGRAM_BOT_USERNAME','vb_kyc_bot')}</strong><br>
+            2. Send <code style="background:#fff;padding:2px 6px;border-radius:4px">/start</code><br>
+            3. Send your loan reference (e.g. <code style="background:#fff;padding:2px 6px;border-radius:4px">AP2604173144</code>)<br>
+            4. Done — you will receive automatic updates
+          </p>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save Profile</button>
+      </form>
+    </div>"""
+    return HTMLResponse(_shell(request, content, user=user))
+
+
+@app.post("/profile")
+async def update_profile(request: Request,
+    name:     str = Form(""),
+    phone:    str = Form(""),
+    email:    str = Form(""),
+    dob:      str = Form(""),
+    employer: str = Form(""),
+    address:  str = Form(""),
+):
+    user = _guard(request)
+    try:
+        _exec("""UPDATE applicants
+                 SET name=:n, phone=:p, email=:e, dob=:d, employer=:em, address=:a
+                 WHERE id=:id""",
+              {"n": name, "p": phone or None, "e": email or None,
+               "d": dob or None, "em": employer or None,
+               "a": address or None, "id": user["id"]})
+
+        # Also update loan_applications phone/email for notification lookup
+        if phone or email:
+            _exec("""UPDATE loan_applications SET
+                     applicant_phone = COALESCE(:p, applicant_phone),
+                     applicant_email = COALESCE(:e, applicant_email)
+                     WHERE applicant_id = :aid""",
+                  {"p": phone or None, "e": email or None,
+                   "aid": str(user["id"])})
+
+        return RedirectResponse("/apply/profile?msg=saved", 303)
+    except Exception as ex:
+        log.error(f"Profile update: {ex}")
+        return RedirectResponse("/apply/profile?msg=error", 303)
+
+
+
 async def login_email(request: Request, email: str=Form(""), password: str=Form("")):
     db = SessionLocal()
     try:
