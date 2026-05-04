@@ -308,245 +308,224 @@ async def extract(pdf_file: UploadFile = File(...)):
 
 @app.get("/progress/{uid}", response_class=HTMLResponse)
 def progress_page(uid: str):
-    """Progress page with live SSE log stream."""
+    """Progress page - starts extraction and polls for updates."""
     body = f"""
     <div style="max-width:700px;margin:0 auto">
       <h1 style="font-size:20px;font-weight:700;margin-bottom:6px">Processing Statement</h1>
       <p style="font-size:13px;color:var(--muted);margin-bottom:20px">
         Extracting transactions from your bank statement PDF...
       </p>
-
       <div class="card">
         <div class="card-title">Extraction Progress</div>
         <div class="progress" style="height:10px;margin-bottom:16px">
-          <div class="progress-bar" id="pbar" style="transition:width .5s"></div>
+          <div class="progress-bar" id="pbar" style="width:5%;transition:width .4s"></div>
         </div>
         <div id="status-text" style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:12px">
           Starting...
         </div>
         <div id="log-box" style="
           background:#0f172a;color:#e2e8f0;font-family:monospace;font-size:12px;
-          padding:16px;border-radius:8px;height:280px;overflow-y:auto;
-          line-height:1.6;white-space:pre-wrap">
-        </div>
+          padding:16px;border-radius:8px;height:300px;overflow-y:auto;
+          line-height:1.7;white-space:pre-wrap;"></div>
       </div>
     </div>
 
     <script>
-    const logBox  = document.getElementById('log-box');
-    const pbar    = document.getElementById('pbar');
-    const statusT = document.getElementById('status-text');
-    const uid     = '{uid}';
+    const uid    = '{uid}';
+    const logBox = document.getElementById('log-box');
+    const pbar   = document.getElementById('pbar');
+    const statT  = document.getElementById('status-text');
+    let   from_  = 0;
 
     function appendLog(msg, color) {{
-      const span = document.createElement('span');
-      span.style.color = color || '#e2e8f0';
-      span.textContent = msg + '\\n';
-      logBox.appendChild(span);
+      const s = document.createElement('span');
+      s.style.color = color || '#e2e8f0';
+      s.textContent = msg + '\\n';
+      logBox.appendChild(s);
       logBox.scrollTop = logBox.scrollHeight;
     }}
 
-    function setProgress(pct, label) {{
-      pbar.style.width = pct + '%';
-      if (label) statusT.textContent = label;
-    }}
+    // Kick off extraction in background
+    fetch('/coho/run/' + uid).catch(() => {{}});
 
-    const es = new EventSource('/coho/stream/' + uid);
+    // Poll every 800ms
+    const timer = setInterval(async () => {{
+      try {{
+        const r = await fetch('/coho/poll/' + uid + '?from=' + from_);
+        if (!r.ok) return;
+        const d = await r.json();
 
-    es.addEventListener('log', e => {{
-      const d = JSON.parse(e.data);
-      appendLog(d.msg, d.color || '#e2e8f0');
-    }});
+        (d.logs || []).forEach(l => {{
+          appendLog(l.msg, l.color);
+          from_++;
+        }});
 
-    es.addEventListener('progress', e => {{
-      const d = JSON.parse(e.data);
-      setProgress(d.pct, d.label);
-    }});
+        if (d.pct)   pbar.style.width = d.pct + '%';
+        if (d.label) statT.textContent = d.label;
 
-    es.addEventListener('done', e => {{
-      es.close();
-      setProgress(100, '✅ Complete — redirecting...');
-      appendLog('\\n✅ Done! Opening results...', '#4ade80');
-      setTimeout(() => {{
-        window.location.href = '/coho/result/' + uid;
-      }}, 800);
-    }});
-
-    es.addEventListener('error_msg', e => {{
-      es.close();
-      const d = JSON.parse(e.data);
-      setProgress(0, '❌ Failed');
-      appendLog('\\n❌ Error: ' + d.msg, '#f87171');
-    }});
-
-    es.onerror = () => {{
-      // SSE closed normally after done/error — ignore
-    }};
+        if (d.done) {{
+          clearInterval(timer);
+          pbar.style.width  = '100%';
+          statT.textContent = '✅ Complete — opening results...';
+          appendLog('\\n✅ Done!', '#4ade80');
+          setTimeout(() => window.location.href = '/coho/result/' + uid, 800);
+        }}
+        if (d.error) {{
+          clearInterval(timer);
+          pbar.style.width  = '0%';
+          statT.textContent = '❌ Failed';
+          appendLog('\\n❌ ' + d.error, '#f87171');
+        }}
+      }} catch(e) {{ /* retry */ }}
+    }}, 800);
     </script>"""
     return HTMLResponse(_shell("Processing", body))
 
 
-@app.get("/stream/{uid}")
-async def stream(uid: str):
-    """Server-Sent Events stream — runs extraction and sends progress."""
-    import asyncio
-    from fastapi.responses import StreamingResponse as SR
+@app.get("/run/{uid}")
+async def run_extraction(uid: str):
+    """Background endpoint — runs extraction and writes log file."""
+    import asyncio, concurrent.futures
 
     job_file = UPLOAD_DIR / f"{uid}_job.json"
     if not job_file.exists():
-        async def err():
-            yield "event: error_msg\ndata: {\"msg\": \"Job not found\"}\n\n"
-        return SR(err(), media_type="text/event-stream")
+        return JSONResponse({"error": "job not found"})
 
     job      = json.loads(job_file.read_text())
     pdf_path = job["pdf_path"]
+    log_file = UPLOAD_DIR / f"{uid}_log.json"
+    err_file = UPLOAD_DIR / f"{uid}_error.txt"
 
-    async def generate():
-        def evt(event: str, data: dict) -> str:
-            return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+    logs = []
 
-        def log(msg: str, color: str = "#e2e8f0"):
-            return evt("log", {"msg": msg, "color": color})
+    def append(msg, color="#e2e8f0", pct=None, label=None):
+        entry = {"msg": msg, "color": color}
+        if pct   is not None: entry["pct"]   = pct
+        if label is not None: entry["label"] = label
+        logs.append(entry)
+        log_file.write_text(json.dumps(logs))
 
-        def prog(pct: int, label: str):
-            return evt("progress", {"pct": pct, "label": label})
-
+    def run():
         try:
-            yield log(f"📄 File: {job['filename']} ({job['size_mb']} MB)", "#94a3b8")
-            yield log(f"⏱  Started: {datetime.now().strftime('%H:%M:%S')}", "#94a3b8")
-            yield log("")
-            yield prog(5, "Opening PDF...")
-            await asyncio.sleep(0.1)
+            from coho_extractor import (
+                BankStatementParser, compute_analytics, fill_coho_template
+            )
+            append(f"📄 File: {job['filename']} ({job['size_mb']} MB)", "#94a3b8", 5, "Opening PDF...")
+            append(f"⏱  Started: {datetime.now().strftime('%H:%M:%S')}", "#94a3b8")
+            append("")
 
-            # Run extraction in thread pool so we don't block async loop
-            import concurrent.futures
-            loop = asyncio.get_event_loop()
+            parser  = BankStatementParser(pdf_path)
+            n_pages = len(parser.pages)
+            append(f"🔍 Pages found: {n_pages}", "#93c5fd", 15, "Reading pages...")
 
-            progress_queue = []
+            header = parser._parse_header()
+            append(f"   Bank:    {header.get('bank','?')}", "#e2e8f0", 25, "Extracting header...")
+            append(f"   Holder:  {header.get('holder_name','?')}")
+            append(f"   Account: {header.get('account_no','?')}")
+            append(f"   Period:  {header.get('period_from','?')} → {header.get('period_to','?')}")
 
-            def run_extraction():
-                from coho_extractor import (
-                    BankStatementParser, compute_analytics, fill_coho_template
-                )
+            append("", "#e2e8f0", 40, "Parsing transactions...")
+            txns = parser._parse_transactions()
+            append(f"💳 Transactions found: {len(txns)}", "#4ade80", 55, "Fixing balances...")
 
-                progress_queue.append(("log", "🔍 Reading PDF pages...", "#93c5fd"))
-                parser = BankStatementParser(pdf_path)
-                n_pages = len(parser.pages)
-                progress_queue.append(("log", f"   Pages found: {n_pages}", "#e2e8f0"))
-                progress_queue.append(("prog", 20, "Extracting account header..."))
+            txns = parser._fix_balances(header.get("opening_balance", 0), txns)
+            data = {
+                "header": header, "transactions": txns,
+                "parsed_at": datetime.now().isoformat(),
+                "source_file": pdf_path,
+            }
 
-                header = parser._parse_header()
-                progress_queue.append(("log",
-                    f"   Bank:    {header.get('bank','?')}", "#e2e8f0"))
-                progress_queue.append(("log",
-                    f"   Holder:  {header.get('holder_name','?')}", "#e2e8f0"))
-                progress_queue.append(("log",
-                    f"   Account: {header.get('account_no','?')}", "#e2e8f0"))
-                progress_queue.append(("log",
-                    f"   Period:  {header.get('period_from','?')} → {header.get('period_to','?')}", "#e2e8f0"))
-                progress_queue.append(("prog", 35, "Parsing transactions..."))
+            append("", "#e2e8f0", 65, "Computing analytics...")
+            an = compute_analytics(data)
+            append(f"   Total In:  ${an.get('total_in_amt',0):,.2f} ({an.get('total_in_trx',0)} trx)", "#4ade80")
+            append(f"   Total Out: ${an.get('total_out_amt',0):,.2f} ({an.get('total_out_trx',0)} trx)", "#f87171")
+            append(f"   Avg Bal:   ${an.get('avg_closing_bal',0):,.2f}")
+            append(f"   Highest:   ${an.get('highest_balance',0):,.2f}")
+            append(f"   Months:    {an.get('period_months',0)}")
 
-                txns = parser._parse_transactions()
-                progress_queue.append(("log",
-                    f"\n💳 Transactions extracted: {len(txns)}", "#4ade80"))
-                txns = parser._fix_balances(header.get("opening_balance", 0), txns)
-                progress_queue.append(("prog", 60, "Computing COHO analytics..."))
+            append("", "#e2e8f0", 80, "Generating Excel...")
+            xlsx_path = str(UPLOAD_DIR / f"{uid}_COHO_Summary.xlsx")
+            fill_coho_template(data, xlsx_path)
+            append("📊 Excel generated!", "#4ade80", 92, "Saving result...")
 
-                data = {
-                    "header":       header,
-                    "transactions": txns,
-                    "parsed_at":    datetime.now().isoformat(),
-                    "source_file":  pdf_path,
-                }
-                an = compute_analytics(data)
-
-                progress_queue.append(("log",
-                    f"   Total In:   ${an.get('total_in_amt',0):,.2f} ({an.get('total_in_trx',0)} trx)", "#4ade80"))
-                progress_queue.append(("log",
-                    f"   Total Out:  ${an.get('total_out_amt',0):,.2f} ({an.get('total_out_trx',0)} trx)", "#f87171"))
-                progress_queue.append(("log",
-                    f"   Avg Bal:    ${an.get('avg_closing_bal',0):,.2f}", "#e2e8f0"))
-                progress_queue.append(("log",
-                    f"   Highest:    ${an.get('highest_balance',0):,.2f}", "#e2e8f0"))
-                progress_queue.append(("log",
-                    f"   Months:     {an.get('period_months',0)}", "#e2e8f0"))
-                progress_queue.append(("prog", 80, "Generating Excel template..."))
-
-                xlsx_path = str(UPLOAD_DIR / f"{uid}_COHO_Summary.xlsx")
-                fill_coho_template(data, xlsx_path)
-                progress_queue.append(("log",
-                    f"\n📊 Excel generated: {Path(xlsx_path).name}", "#4ade80"))
-                progress_queue.append(("prog", 95, "Saving results..."))
-
-                # Save result for result page
-                result_file = UPLOAD_DIR / f"{uid}_result.json"
-                result_file.write_text(json.dumps({
-                    "uid":      uid,
-                    "header":   {k: str(v) for k, v in header.items()},
-                    "analytics": {
-                        k: v for k, v in an.items()
-                        if k not in ("monthly_rows", "daily_closing")
-                    },
-                    "monthly_rows": [
-                        {k2: str(v2) if hasattr(v2,'strftime') else v2
-                         for k2, v2 in mr.items()}
-                        for mr in an.get("monthly_rows", [])
-                    ],
-                    "total_transactions": len(txns),
-                    "transactions": [
-                        {
-                            "date":      t["date"].isoformat(),
-                            "desc":      t["desc"],
-                            "money_in":  t["money_in"],
-                            "money_out": t["money_out"],
-                            "os_balance":t["os_balance"],
-                            "is_closing":t["date"].isoformat() in
-                                [d.isoformat() for d in an.get("daily_closing",{}).keys()]
-                                and abs(t["os_balance"] -
-                                    an.get("daily_closing",{}).get(t["date"],99999)) < 0.01
-                        }
-                        for t in txns
-                    ],
-                }))
-                progress_queue.append(("done", None, None))
-                return True
-
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = loop.run_in_executor(pool, run_extraction)
-
-                while not future.done():
-                    while progress_queue:
-                        item = progress_queue.pop(0)
-                        if item[0] == "log":
-                            yield log(item[1], item[2])
-                        elif item[0] == "prog":
-                            yield prog(item[1], item[2])
-                        elif item[0] == "done":
-                            break
-                    await asyncio.sleep(0.05)
-
-                # Flush remaining
-                while progress_queue:
-                    item = progress_queue.pop(0)
-                    if item[0] == "log":
-                        yield log(item[1], item[2])
-                    elif item[0] == "prog":
-                        yield prog(item[1], item[2])
-
-                await future
-
-            yield prog(100, "Complete!")
-            yield evt("done", {})
+            # Save result JSON
+            result_file = UPLOAD_DIR / f"{uid}_result.json"
+            result_file.write_text(json.dumps({
+                "uid": uid,
+                "header":  {k: str(v) for k, v in header.items()},
+                "analytics": {
+                    k: v for k, v in an.items()
+                    if k not in ("monthly_rows","daily_closing")
+                },
+                "monthly_rows": [
+                    {k2: str(v2) if hasattr(v2,"strftime") else v2
+                     for k2, v2 in mr.items()}
+                    for mr in an.get("monthly_rows", [])
+                ],
+                "total_transactions": len(txns),
+                "transactions": [
+                    {
+                        "date":       t["date"].isoformat(),
+                        "desc":       t["desc"],
+                        "money_in":   t["money_in"],
+                        "money_out":  t["money_out"],
+                        "os_balance": t["os_balance"],
+                        "is_closing": (
+                            t["date"] in an.get("daily_closing", {}) and
+                            abs(t["os_balance"] -
+                                an["daily_closing"].get(t["date"], 99999)) < 0.01
+                        ),
+                    }
+                    for t in txns
+                ],
+            }))
+            append("✅ Complete!", "#4ade80", 100, "Done!")
 
         except Exception as e:
             import traceback
-            yield log(f"\n❌ Error: {e}", "#f87171")
-            yield log(traceback.format_exc(), "#f87171")
-            yield evt("error_msg", {"msg": str(e)})
+            err_file.write_text(str(e))
+            append(f"❌ Error: {e}", "#f87171")
+            append(traceback.format_exc(), "#f87171")
 
-    return SR(generate(), media_type="text/event-stream",
-              headers={"Cache-Control": "no-cache",
-                       "X-Accel-Buffering": "no"})
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, run)
+    return JSONResponse({"started": True})
+
+
+@app.get("/poll/{uid}")
+def poll(uid: str, from_: int = 0):
+    """Poll extraction progress — returns new log lines since last poll."""
+    log_file  = UPLOAD_DIR / f"{uid}_log.json"
+    done_file = UPLOAD_DIR / f"{uid}_result.json"
+    err_file  = UPLOAD_DIR / f"{uid}_error.txt"
+
+    logs = []
+    pct  = 5
+    label = "Processing..."
+
+    if log_file.exists():
+        try:
+            all_logs = json.loads(log_file.read_text())
+            logs     = all_logs[from_:]
+            if all_logs:
+                last  = all_logs[-1]
+                pct   = last.get("pct", pct)
+                label = last.get("label", label)
+        except: pass
+
+    return JSONResponse({
+        "logs":  logs,
+        "pct":   pct,
+        "label": label,
+        "done":  done_file.exists(),
+        "error": err_file.read_text() if err_file.exists() else None,
+    })
+
+
+
+
+
+
 
 
 @app.get("/result/{uid}", response_class=HTMLResponse)

@@ -368,21 +368,23 @@ def progress_page(uid: str):
       <div class="card">
         <div class="card-title">Extraction Progress</div>
         <div class="progress" style="height:10px;margin-bottom:16px">
-          <div class="progress-bar" id="pbar" style="transition:width .5s"></div>
+          <div class="progress-bar" id="pbar" style="width:5%;transition:width .4s"></div>
         </div>
         <div id="status-text" style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:12px">
           Starting...
         </div>
         <div id="log-box" style="
           background:#0f172a;color:#e2e8f0;font-family:monospace;font-size:12px;
-          padding:16px;border-radius:8px;height:280px;overflow-y:auto;
-          line-height:1.6;white-space:pre-wrap"></div>
+          padding:16px;border-radius:8px;height:300px;overflow-y:auto;
+          line-height:1.7;white-space:pre-wrap;"></div>
       </div>
     </div>
     <script>
-    const logBox  = document.getElementById('log-box');
-    const pbar    = document.getElementById('pbar');
-    const statusT = document.getElementById('status-text');
+    const uid    = '{uid}';
+    const logBox = document.getElementById('log-box');
+    const pbar   = document.getElementById('pbar');
+    const statT  = document.getElementById('status-text');
+    let   from_  = 0;
     function appendLog(msg, color) {{
       const s = document.createElement('span');
       s.style.color = color || '#e2e8f0';
@@ -390,130 +392,144 @@ def progress_page(uid: str):
       logBox.appendChild(s);
       logBox.scrollTop = logBox.scrollHeight;
     }}
-    function setProgress(pct, label) {{
-      pbar.style.width = pct + '%';
-      if (label) statusT.textContent = label;
-    }}
-    const es = new EventSource('/cbc/stream/{uid}');
-    es.addEventListener('log',      e => {{ const d=JSON.parse(e.data); appendLog(d.msg, d.color); }});
-    es.addEventListener('progress', e => {{ const d=JSON.parse(e.data); setProgress(d.pct, d.label); }});
-    es.addEventListener('done',     e => {{
-      es.close(); setProgress(100, '✅ Complete — redirecting...');
-      appendLog('\\n✅ Done!', '#4ade80');
-      setTimeout(() => window.location.href = '/cbc/result/{uid}', 800);
-    }});
-    es.addEventListener('error_msg', e => {{
-      es.close(); const d=JSON.parse(e.data);
-      setProgress(0,'❌ Failed'); appendLog('\\n❌ ' + d.msg, '#f87171');
-    }});
+    fetch('/cbc/run/' + uid).catch(() => {{}});
+    const timer = setInterval(async () => {{
+      try {{
+        const r = await fetch('/cbc/poll/' + uid + '?from=' + from_);
+        if (!r.ok) return;
+        const d = await r.json();
+        (d.logs || []).forEach(l => {{ appendLog(l.msg, l.color); from_++; }});
+        if (d.pct)   pbar.style.width  = d.pct + '%';
+        if (d.label) statT.textContent = d.label;
+        if (d.done) {{
+          clearInterval(timer);
+          pbar.style.width  = '100%';
+          statT.textContent = '✅ Complete — opening results...';
+          appendLog('\\n✅ Done!', '#4ade80');
+          setTimeout(() => window.location.href = '/cbc/result/' + uid, 800);
+        }}
+        if (d.error) {{
+          clearInterval(timer);
+          statT.textContent = '❌ Failed';
+          appendLog('\\n❌ ' + d.error, '#f87171');
+        }}
+      }} catch(e) {{ /* retry */ }}
+    }}, 800);
     </script>"""
     return HTMLResponse(_shell("Processing", body))
 
 
-@app.get("/stream/{uid}")
-async def stream(uid: str):
+@app.get("/run/{uid}")
+async def run_extraction(uid: str):
+    """Background extraction — writes progress to log file."""
     import asyncio
-    from fastapi.responses import StreamingResponse as SR
 
     job_file = UPLOAD_DIR / f"{uid}_job.json"
     if not job_file.exists():
-        async def err():
-            yield f"event: error_msg\ndata: {{\"msg\": \"Job not found\"}}\n\n"
-        return SR(err(), media_type="text/event-stream")
+        return JSONResponse({"error": "job not found"})
 
     job      = json.loads(job_file.read_text())
     pdf_path = job["pdf_path"]
+    log_file = UPLOAD_DIR / f"{uid}_log.json"
+    err_file = UPLOAD_DIR / f"{uid}_error.txt"
+    logs     = []
 
-    async def generate():
-        def evt(event, data): return f"event: {event}\ndata: {json.dumps(data)}\n\n"
-        def log(msg, color="#e2e8f0"): return evt("log", {"msg": msg, "color": color})
-        def prog(pct, label):          return evt("progress", {"pct": pct, "label": label})
+    def append(msg, color="#e2e8f0", pct=None, label=None):
+        entry = {"msg": msg, "color": color}
+        if pct   is not None: entry["pct"]   = pct
+        if label is not None: entry["label"] = label
+        logs.append(entry)
+        log_file.write_text(json.dumps(logs))
 
+    def run():
         try:
-            yield log(f"📄 File: {job['filename']} ({job['size_mb']} MB)", "#94a3b8")
-            yield prog(5, "Opening PDF...")
+            from cbc_extractor import extract_cbc_data, fill_excel_template
+            append(f"📄 File: {job['filename']} ({job['size_mb']} MB)", "#94a3b8", 5, "Opening PDF...")
+            append(f"⏱  Started: {datetime.now().strftime('%H:%M:%S')}", "#94a3b8")
+            append("🔍 Parsing CBC report...", "#93c5fd", 20, "Reading applicant data...")
 
-            import concurrent.futures
-            loop = asyncio.get_event_loop()
-            q = []
+            data = extract_cbc_data(pdf_path)
+            h    = data["header"]
+            apps = data["applicants"]
 
-            def run():
-                from cbc_extractor import extract_cbc_data, fill_excel_template
-                q.append(("log","🔍 Parsing CBC report...","#93c5fd"))
-                q.append(("prog", 15, "Reading applicant data..."))
+            append(f"   Enquiry No:  {h.get('enquiry_number','')}", "#e2e8f0", 40, "Extracting accounts...")
+            append(f"   Report Date: {h.get('report_date','')}")
+            append(f"   Applicants:  {len(apps)}", "#4ade80")
 
-                data = extract_cbc_data(pdf_path)
-                h    = data["header"]
-                apps = data["applicants"]
+            for app in apps:
+                p  = app["personal"]
+                s  = app["summary"]
+                ac = app["accounts"]
+                append(f"\n👤 Applicant {app['index']}: {p.get('full_name_en','?')}", "#4ade80")
+                append(f"   Total accounts: {s.get('total_accounts',0)}")
+                append(f"   Normal/Closed:  {s.get('normal_accounts',0)} / {s.get('closed_accounts',0)}")
+                append(f"   Active found:   {len(ac.get('active',[]))}")
+                append(f"   Closed found:   {len(ac.get('closed',[]))}")
 
-                q.append(("log", f"   Enquiry No:  {h.get('enquiry_number','')}", "#e2e8f0"))
-                q.append(("log", f"   Report Date: {h.get('report_date','')}", "#e2e8f0"))
-                q.append(("log", f"   Applicants:  {len(apps)}", "#e2e8f0"))
-                q.append(("prog", 40, "Extracting account details..."))
+            append("", "#e2e8f0", 75, "Generating Excel template...")
+            xlsx_path = str(UPLOAD_DIR / f"{uid}_CBC_Summary.xlsx")
+            fill_excel_template(data, xlsx_path)
+            append("📊 Excel generated!", "#4ade80", 90, "Saving result...")
 
-                for app in apps:
-                    p  = app["personal"]
-                    s  = app["summary"]
-                    ac = app["accounts"]
-                    q.append(("log", f"\n👤 Applicant {app['index']}: {p.get('full_name_en','?')}", "#4ade80"))
-                    q.append(("log", f"   Total accounts: {s.get('total_accounts',0)}", "#e2e8f0"))
-                    q.append(("log", f"   Normal/Closed:  {s.get('normal_accounts',0)} / {s.get('closed_accounts',0)}", "#e2e8f0"))
-                    q.append(("log", f"   Active found:   {len(ac.get('active',[]))}", "#e2e8f0"))
-                    q.append(("log", f"   Closed found:   {len(ac.get('closed',[]))}", "#e2e8f0"))
-
-                q.append(("prog", 75, "Generating Excel template..."))
-                xlsx_path = str(UPLOAD_DIR / f"{uid}_CBC_Summary.xlsx")
-                fill_excel_template(data, xlsx_path)
-                q.append(("log", f"\n📊 Excel generated successfully", "#4ade80"))
-                q.append(("prog", 95, "Saving..."))
-
-                # Save result for result page
-                result_file = UPLOAD_DIR / f"{uid}_result.json"
-                result_file.write_text(json.dumps({
-                    "uid": uid, "header": h,
-                    "applicants": [
-                        {
-                            "index":    a["index"],
-                            "personal": a["personal"],
-                            "summary":  a["summary"],
-                            "accounts": {
-                                k: [{kk: str(vv) if hasattr(vv,'strftime') else vv
-                                     for kk,vv in acc.items()}
-                                    for acc in v]
-                                for k,v in a["accounts"].items()
-                            }
+            result_file = UPLOAD_DIR / f"{uid}_result.json"
+            result_file.write_text(json.dumps({
+                "uid": uid, "header": h,
+                "applicants": [
+                    {
+                        "index":    a["index"],
+                        "personal": a["personal"],
+                        "summary":  a["summary"],
+                        "accounts": {
+                            k: [{kk: str(vv) if hasattr(vv, "strftime") else vv
+                                 for kk, vv in acc.items()}
+                                for acc in v]
+                            for k, v in a["accounts"].items()
                         }
-                        for a in apps
-                    ]
-                }, default=str))
-                q.append(("done", None, None))
-
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = loop.run_in_executor(pool, run)
-                while not future.done():
-                    while q:
-                        item = q.pop(0)
-                        if item[0] == "log":   yield log(item[1], item[2])
-                        elif item[0] == "prog": yield prog(item[1], item[2])
-                    await asyncio.sleep(0.05)
-                while q:
-                    item = q.pop(0)
-                    if item[0] == "log":   yield log(item[1], item[2])
-                    elif item[0] == "prog": yield prog(item[1], item[2])
-                await future
-
-            yield prog(100, "Complete!")
-            yield evt("done", {})
+                    }
+                    for a in apps
+                ]
+            }, default=str))
+            append("✅ Complete!", "#4ade80", 100, "Done!")
 
         except Exception as e:
             import traceback
-            yield log(f"\n❌ {e}", "#f87171")
-            yield log(traceback.format_exc(), "#f87171")
-            yield evt("error_msg", {"msg": str(e)})
+            err_file.write_text(str(e))
+            append(f"❌ Error: {e}", "#f87171")
+            append(traceback.format_exc(), "#f87171")
 
-    return SR(generate(), media_type="text/event-stream",
-              headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, run)
+    return JSONResponse({"started": True})
 
+
+@app.get("/poll/{uid}")
+def poll(uid: str, from_: int = 0):
+    """Poll extraction progress."""
+    log_file  = UPLOAD_DIR / f"{uid}_log.json"
+    done_file = UPLOAD_DIR / f"{uid}_result.json"
+    err_file  = UPLOAD_DIR / f"{uid}_error.txt"
+
+    logs  = []
+    pct   = 5
+    label = "Processing..."
+
+    if log_file.exists():
+        try:
+            all_logs = json.loads(log_file.read_text())
+            logs     = all_logs[from_:]
+            if all_logs:
+                last  = all_logs[-1]
+                pct   = last.get("pct", pct)
+                label = last.get("label", label)
+        except: pass
+
+    return JSONResponse({
+        "logs":  logs,
+        "pct":   pct,
+        "label": label,
+        "done":  done_file.exists(),
+        "error": err_file.read_text() if err_file.exists() else None,
+    })
 
 @app.get("/result/{uid}", response_class=HTMLResponse)
 def result_page(uid: str):
