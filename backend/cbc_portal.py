@@ -340,29 +340,246 @@ function startUpload() {
 
 @app.post("/extract", response_class=HTMLResponse)
 async def extract(pdf_file: UploadFile = File(...)):
-    """Upload PDF, extract data, show preview."""
-    if not pdf_file.filename.lower().endswith(".pdf"):
-        return HTMLResponse(_shell("Error", '<div class="alert alert-err">Please upload a PDF file.</div>'))
-
-    # Save uploaded file
+    """Upload PDF and redirect to progress page."""
     uid      = str(uuid.uuid4())[:8]
     pdf_path = UPLOAD_DIR / f"{uid}_{pdf_file.filename}"
     content  = await pdf_file.read()
     pdf_path.write_bytes(content)
 
-    # Extract
-    try:
-        from cbc_extractor import extract_cbc_data, fill_excel_template
-        data     = extract_cbc_data(str(pdf_path))
-        xlsx_path = UPLOAD_DIR / f"{uid}_CBC_Summary.xlsx"
-        fill_excel_template(data, str(xlsx_path))
-    except Exception as e:
-        log.error(f"Extraction failed: {e}")
-        return HTMLResponse(_shell("Error",
-            f'<div class="alert alert-err">Extraction failed: {e}</div>'))
+    job_file = UPLOAD_DIR / f"{uid}_job.json"
+    job_file.write_text(json.dumps({
+        "uid":      uid,
+        "filename": pdf_file.filename,
+        "pdf_path": str(pdf_path),
+        "size_mb":  round(len(content)/1024/1024, 2),
+    }))
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"/cbc/progress/{uid}", status_code=303)
 
-    header     = data.get("header", {})
-    applicants = data.get("applicants", [])
+
+@app.get("/progress/{uid}", response_class=HTMLResponse)
+def progress_page(uid: str):
+    body = f"""
+    <div style="max-width:700px;margin:0 auto">
+      <h1 style="font-size:20px;font-weight:700;margin-bottom:6px">Processing CBC Report</h1>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px">
+        Extracting credit data from CBC PDF...
+      </p>
+      <div class="card">
+        <div class="card-title">Extraction Progress</div>
+        <div class="progress" style="height:10px;margin-bottom:16px">
+          <div class="progress-bar" id="pbar" style="transition:width .5s"></div>
+        </div>
+        <div id="status-text" style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:12px">
+          Starting...
+        </div>
+        <div id="log-box" style="
+          background:#0f172a;color:#e2e8f0;font-family:monospace;font-size:12px;
+          padding:16px;border-radius:8px;height:280px;overflow-y:auto;
+          line-height:1.6;white-space:pre-wrap"></div>
+      </div>
+    </div>
+    <script>
+    const logBox  = document.getElementById('log-box');
+    const pbar    = document.getElementById('pbar');
+    const statusT = document.getElementById('status-text');
+    function appendLog(msg, color) {{
+      const s = document.createElement('span');
+      s.style.color = color || '#e2e8f0';
+      s.textContent = msg + '\\n';
+      logBox.appendChild(s);
+      logBox.scrollTop = logBox.scrollHeight;
+    }}
+    function setProgress(pct, label) {{
+      pbar.style.width = pct + '%';
+      if (label) statusT.textContent = label;
+    }}
+    const es = new EventSource('/cbc/stream/{uid}');
+    es.addEventListener('log',      e => {{ const d=JSON.parse(e.data); appendLog(d.msg, d.color); }});
+    es.addEventListener('progress', e => {{ const d=JSON.parse(e.data); setProgress(d.pct, d.label); }});
+    es.addEventListener('done',     e => {{
+      es.close(); setProgress(100, '✅ Complete — redirecting...');
+      appendLog('\\n✅ Done!', '#4ade80');
+      setTimeout(() => window.location.href = '/cbc/result/{uid}', 800);
+    }});
+    es.addEventListener('error_msg', e => {{
+      es.close(); const d=JSON.parse(e.data);
+      setProgress(0,'❌ Failed'); appendLog('\\n❌ ' + d.msg, '#f87171');
+    }});
+    </script>"""
+    return HTMLResponse(_shell("Processing", body))
+
+
+@app.get("/stream/{uid}")
+async def stream(uid: str):
+    import asyncio
+    from fastapi.responses import StreamingResponse as SR
+
+    job_file = UPLOAD_DIR / f"{uid}_job.json"
+    if not job_file.exists():
+        async def err():
+            yield f"event: error_msg\ndata: {{\"msg\": \"Job not found\"}}\n\n"
+        return SR(err(), media_type="text/event-stream")
+
+    job      = json.loads(job_file.read_text())
+    pdf_path = job["pdf_path"]
+
+    async def generate():
+        def evt(event, data): return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+        def log(msg, color="#e2e8f0"): return evt("log", {"msg": msg, "color": color})
+        def prog(pct, label):          return evt("progress", {"pct": pct, "label": label})
+
+        try:
+            yield log(f"📄 File: {job['filename']} ({job['size_mb']} MB)", "#94a3b8")
+            yield prog(5, "Opening PDF...")
+
+            import concurrent.futures
+            loop = asyncio.get_event_loop()
+            q = []
+
+            def run():
+                from cbc_extractor import extract_cbc_data, fill_excel_template
+                q.append(("log","🔍 Parsing CBC report...","#93c5fd"))
+                q.append(("prog", 15, "Reading applicant data..."))
+
+                data = extract_cbc_data(pdf_path)
+                h    = data["header"]
+                apps = data["applicants"]
+
+                q.append(("log", f"   Enquiry No:  {h.get('enquiry_number','')}", "#e2e8f0"))
+                q.append(("log", f"   Report Date: {h.get('report_date','')}", "#e2e8f0"))
+                q.append(("log", f"   Applicants:  {len(apps)}", "#e2e8f0"))
+                q.append(("prog", 40, "Extracting account details..."))
+
+                for app in apps:
+                    p  = app["personal"]
+                    s  = app["summary"]
+                    ac = app["accounts"]
+                    q.append(("log", f"\n👤 Applicant {app['index']}: {p.get('full_name_en','?')}", "#4ade80"))
+                    q.append(("log", f"   Total accounts: {s.get('total_accounts',0)}", "#e2e8f0"))
+                    q.append(("log", f"   Normal/Closed:  {s.get('normal_accounts',0)} / {s.get('closed_accounts',0)}", "#e2e8f0"))
+                    q.append(("log", f"   Active found:   {len(ac.get('active',[]))}", "#e2e8f0"))
+                    q.append(("log", f"   Closed found:   {len(ac.get('closed',[]))}", "#e2e8f0"))
+
+                q.append(("prog", 75, "Generating Excel template..."))
+                xlsx_path = str(UPLOAD_DIR / f"{uid}_CBC_Summary.xlsx")
+                fill_excel_template(data, xlsx_path)
+                q.append(("log", f"\n📊 Excel generated successfully", "#4ade80"))
+                q.append(("prog", 95, "Saving..."))
+
+                # Save result for result page
+                result_file = UPLOAD_DIR / f"{uid}_result.json"
+                result_file.write_text(json.dumps({
+                    "uid": uid, "header": h,
+                    "applicants": [
+                        {
+                            "index":    a["index"],
+                            "personal": a["personal"],
+                            "summary":  a["summary"],
+                            "accounts": {
+                                k: [{kk: str(vv) if hasattr(vv,'strftime') else vv
+                                     for kk,vv in acc.items()}
+                                    for acc in v]
+                                for k,v in a["accounts"].items()
+                            }
+                        }
+                        for a in apps
+                    ]
+                }, default=str))
+                q.append(("done", None, None))
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = loop.run_in_executor(pool, run)
+                while not future.done():
+                    while q:
+                        item = q.pop(0)
+                        if item[0] == "log":   yield log(item[1], item[2])
+                        elif item[0] == "prog": yield prog(item[1], item[2])
+                    await asyncio.sleep(0.05)
+                while q:
+                    item = q.pop(0)
+                    if item[0] == "log":   yield log(item[1], item[2])
+                    elif item[0] == "prog": yield prog(item[1], item[2])
+                await future
+
+            yield prog(100, "Complete!")
+            yield evt("done", {})
+
+        except Exception as e:
+            import traceback
+            yield log(f"\n❌ {e}", "#f87171")
+            yield log(traceback.format_exc(), "#f87171")
+            yield evt("error_msg", {"msg": str(e)})
+
+    return SR(generate(), media_type="text/event-stream",
+              headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+
+
+@app.get("/result/{uid}", response_class=HTMLResponse)
+def result_page(uid: str):
+    result_file = UPLOAD_DIR / f"{uid}_result.json"
+    if not result_file.exists():
+        return HTMLResponse(_shell("Error",
+            '<div class="alert alert-err">Result not found.</div>'))
+
+    result     = json.loads(result_file.read_text())
+    header     = result.get("header", {})
+    applicants = result.get("applicants", [])
+
+    tabs_html   = '<div class="tab-row">'
+    panels_html = ""
+    for i, app in enumerate(applicants):
+        p    = app.get("personal", {})
+        name = p.get("full_name_en","") or f"Applicant {app['index']}"
+        active_cls = "active" if i == 0 else ""
+        tabs_html   += f'<button class="tab {active_cls}" onclick="showTab({i})" id="tab-{i}">{name}</button>'
+        panels_html += _build_applicant_panel(app, i, active_cls)
+    tabs_html += "</div>"
+
+    body = f"""
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <div>
+        <h1 style="font-size:20px;font-weight:700">✅ CBC Extraction Complete</h1>
+      </div>
+      <div style="display:flex;gap:10px">
+        <a href="/cbc/download/{uid}" class="btn btn-primary btn-lg">⬇ Download Excel</a>
+        <a href="/cbc/" class="btn btn-ghost">Upload Another</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Report Header</div>
+      <div class="cbc-info">
+        <div class="cbc-info-item"><div class="cbc-info-label">Enquiry No.</div>
+          <div class="cbc-info-val">{header.get('enquiry_number','—')}</div></div>
+        <div class="cbc-info-item"><div class="cbc-info-label">Report Date</div>
+          <div class="cbc-info-val">{header.get('report_date','—')}</div></div>
+        <div class="cbc-info-item"><div class="cbc-info-label">Product Type</div>
+          <div class="cbc-info-val">{header.get('product_type','—')}</div></div>
+        <div class="cbc-info-item"><div class="cbc-info-label">Amount</div>
+          <div class="cbc-info-val">{header.get('amount','—')}</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Applicant Details</div>
+      {tabs_html}
+      <div style="padding-top:16px">{panels_html}</div>
+    </div>
+
+    <div style="text-align:center;padding:20px">
+      <a href="/cbc/download/{uid}" class="btn btn-primary btn-lg">
+        ⬇ Download Filled Excel Template
+      </a>
+    </div>"""
+
+    scripts = """<script>
+function showTab(idx) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.className='tab'+(i===idx?' active':''));
+  document.querySelectorAll('.tab-content').forEach((p,i) => p.className='tab-content'+(i===idx?' active':''));
+}
+</script>"""
+    return HTMLResponse(_shell("Results", body, scripts))
 
     # ── Build preview ─────────────────────────────────────────────────────────
     tabs_html  = '<div class="tab-row">'

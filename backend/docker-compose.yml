@@ -171,6 +171,26 @@ services:
     networks:
       - internal
 
+  # ── COHO Bank Statement Portal ───────────────────────────────────────────────
+  coho-portal:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: uvicorn coho_portal:app --host 0.0.0.0 --port 8008
+    volumes:
+      - uploads:/app/uploads
+    networks:
+      - internal
+
+  # ── CBC Credit Analysis Portal ──────────────────────────────────────────────
+  cbc-portal:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: uvicorn cbc_portal:app --host 0.0.0.0 --port 8007
+    volumes:
+      - uploads:/app/uploads
+    networks:
+      - internal
+
   # ── Applicant self-service portal ────────────────────────────────────────────
   applicant-portal:
     <<: [*app-build, *app-env]
@@ -195,25 +215,6 @@ services:
     restart: unless-stopped
     command: uvicorn loan_integration:app --host 0.0.0.0 --port 8004
     volumes: *uploads-volume
-    networks:
-      - internal
-# ── COHO Bank Statement Portal ───────────────────────────────────────────────
-  coho-portal:
-    <<: [*app-build, *app-env]
-    restart: unless-stopped
-    command: uvicorn coho_portal:app --host 0.0.0.0 --port 8008
-    volumes:
-      - uploads:/app/uploads
-    networks:
-      - internal
-
-# ── CBC Credit Analysis Portal ──────────────────────────────────────────────
-  cbc-portal:
-    <<: [*app-build, *app-env]
-    restart: unless-stopped
-    command: uvicorn cbc_portal:app --host 0.0.0.0 --port 8007
-    volumes:
-      - uploads:/app/uploads
     networks:
       - internal
 

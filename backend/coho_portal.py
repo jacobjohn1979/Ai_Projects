@@ -285,33 +285,289 @@ function startUpload() {
 
 @app.post("/extract", response_class=HTMLResponse)
 async def extract(pdf_file: UploadFile = File(...)):
-    """Upload, extract, preview."""
-    uid     = str(uuid.uuid4())[:8]
-    suffix  = Path(pdf_file.filename).suffix.lower()
+    """Upload PDF and redirect to progress page."""
+    uid      = str(uuid.uuid4())[:8]
     pdf_path = UPLOAD_DIR / f"{uid}_{pdf_file.filename}"
-    content = await pdf_file.read()
+    content  = await pdf_file.read()
     pdf_path.write_bytes(content)
 
-    try:
-        from coho_extractor import extract_statement, fill_coho_template, compute_analytics
-        data      = extract_statement(str(pdf_path))
-        analytics = compute_analytics(data)
-        xlsx_path = UPLOAD_DIR / f"{uid}_COHO_Summary.xlsx"
-        fill_coho_template(data, str(xlsx_path))
-    except Exception as e:
-        log.error(f"Extraction failed: {e}")
+    # Store job metadata
+    job_file = UPLOAD_DIR / f"{uid}_job.json"
+    job_file.write_text(json.dumps({
+        "uid":      uid,
+        "filename": pdf_file.filename,
+        "pdf_path": str(pdf_path),
+        "status":   "queued",
+        "size_mb":  round(len(content)/1024/1024, 2),
+    }))
+
+    # Redirect to progress page
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"/coho/progress/{uid}", status_code=303)
+
+
+@app.get("/progress/{uid}", response_class=HTMLResponse)
+def progress_page(uid: str):
+    """Progress page with live SSE log stream."""
+    body = f"""
+    <div style="max-width:700px;margin:0 auto">
+      <h1 style="font-size:20px;font-weight:700;margin-bottom:6px">Processing Statement</h1>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px">
+        Extracting transactions from your bank statement PDF...
+      </p>
+
+      <div class="card">
+        <div class="card-title">Extraction Progress</div>
+        <div class="progress" style="height:10px;margin-bottom:16px">
+          <div class="progress-bar" id="pbar" style="transition:width .5s"></div>
+        </div>
+        <div id="status-text" style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:12px">
+          Starting...
+        </div>
+        <div id="log-box" style="
+          background:#0f172a;color:#e2e8f0;font-family:monospace;font-size:12px;
+          padding:16px;border-radius:8px;height:280px;overflow-y:auto;
+          line-height:1.6;white-space:pre-wrap">
+        </div>
+      </div>
+    </div>
+
+    <script>
+    const logBox  = document.getElementById('log-box');
+    const pbar    = document.getElementById('pbar');
+    const statusT = document.getElementById('status-text');
+    const uid     = '{uid}';
+
+    function appendLog(msg, color) {{
+      const span = document.createElement('span');
+      span.style.color = color || '#e2e8f0';
+      span.textContent = msg + '\\n';
+      logBox.appendChild(span);
+      logBox.scrollTop = logBox.scrollHeight;
+    }}
+
+    function setProgress(pct, label) {{
+      pbar.style.width = pct + '%';
+      if (label) statusT.textContent = label;
+    }}
+
+    const es = new EventSource('/coho/stream/' + uid);
+
+    es.addEventListener('log', e => {{
+      const d = JSON.parse(e.data);
+      appendLog(d.msg, d.color || '#e2e8f0');
+    }});
+
+    es.addEventListener('progress', e => {{
+      const d = JSON.parse(e.data);
+      setProgress(d.pct, d.label);
+    }});
+
+    es.addEventListener('done', e => {{
+      es.close();
+      setProgress(100, '✅ Complete — redirecting...');
+      appendLog('\\n✅ Done! Opening results...', '#4ade80');
+      setTimeout(() => {{
+        window.location.href = '/coho/result/' + uid;
+      }}, 800);
+    }});
+
+    es.addEventListener('error_msg', e => {{
+      es.close();
+      const d = JSON.parse(e.data);
+      setProgress(0, '❌ Failed');
+      appendLog('\\n❌ Error: ' + d.msg, '#f87171');
+    }});
+
+    es.onerror = () => {{
+      // SSE closed normally after done/error — ignore
+    }};
+    </script>"""
+    return HTMLResponse(_shell("Processing", body))
+
+
+@app.get("/stream/{uid}")
+async def stream(uid: str):
+    """Server-Sent Events stream — runs extraction and sends progress."""
+    import asyncio
+    from fastapi.responses import StreamingResponse as SR
+
+    job_file = UPLOAD_DIR / f"{uid}_job.json"
+    if not job_file.exists():
+        async def err():
+            yield "event: error_msg\ndata: {\"msg\": \"Job not found\"}\n\n"
+        return SR(err(), media_type="text/event-stream")
+
+    job      = json.loads(job_file.read_text())
+    pdf_path = job["pdf_path"]
+
+    async def generate():
+        def evt(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+        def log(msg: str, color: str = "#e2e8f0"):
+            return evt("log", {"msg": msg, "color": color})
+
+        def prog(pct: int, label: str):
+            return evt("progress", {"pct": pct, "label": label})
+
+        try:
+            yield log(f"📄 File: {job['filename']} ({job['size_mb']} MB)", "#94a3b8")
+            yield log(f"⏱  Started: {datetime.now().strftime('%H:%M:%S')}", "#94a3b8")
+            yield log("")
+            yield prog(5, "Opening PDF...")
+            await asyncio.sleep(0.1)
+
+            # Run extraction in thread pool so we don't block async loop
+            import concurrent.futures
+            loop = asyncio.get_event_loop()
+
+            progress_queue = []
+
+            def run_extraction():
+                from coho_extractor import (
+                    BankStatementParser, compute_analytics, fill_coho_template
+                )
+
+                progress_queue.append(("log", "🔍 Reading PDF pages...", "#93c5fd"))
+                parser = BankStatementParser(pdf_path)
+                n_pages = len(parser.pages)
+                progress_queue.append(("log", f"   Pages found: {n_pages}", "#e2e8f0"))
+                progress_queue.append(("prog", 20, "Extracting account header..."))
+
+                header = parser._parse_header()
+                progress_queue.append(("log",
+                    f"   Bank:    {header.get('bank','?')}", "#e2e8f0"))
+                progress_queue.append(("log",
+                    f"   Holder:  {header.get('holder_name','?')}", "#e2e8f0"))
+                progress_queue.append(("log",
+                    f"   Account: {header.get('account_no','?')}", "#e2e8f0"))
+                progress_queue.append(("log",
+                    f"   Period:  {header.get('period_from','?')} → {header.get('period_to','?')}", "#e2e8f0"))
+                progress_queue.append(("prog", 35, "Parsing transactions..."))
+
+                txns = parser._parse_transactions()
+                progress_queue.append(("log",
+                    f"\n💳 Transactions extracted: {len(txns)}", "#4ade80"))
+                txns = parser._fix_balances(header.get("opening_balance", 0), txns)
+                progress_queue.append(("prog", 60, "Computing COHO analytics..."))
+
+                data = {
+                    "header":       header,
+                    "transactions": txns,
+                    "parsed_at":    datetime.now().isoformat(),
+                    "source_file":  pdf_path,
+                }
+                an = compute_analytics(data)
+
+                progress_queue.append(("log",
+                    f"   Total In:   ${an.get('total_in_amt',0):,.2f} ({an.get('total_in_trx',0)} trx)", "#4ade80"))
+                progress_queue.append(("log",
+                    f"   Total Out:  ${an.get('total_out_amt',0):,.2f} ({an.get('total_out_trx',0)} trx)", "#f87171"))
+                progress_queue.append(("log",
+                    f"   Avg Bal:    ${an.get('avg_closing_bal',0):,.2f}", "#e2e8f0"))
+                progress_queue.append(("log",
+                    f"   Highest:    ${an.get('highest_balance',0):,.2f}", "#e2e8f0"))
+                progress_queue.append(("log",
+                    f"   Months:     {an.get('period_months',0)}", "#e2e8f0"))
+                progress_queue.append(("prog", 80, "Generating Excel template..."))
+
+                xlsx_path = str(UPLOAD_DIR / f"{uid}_COHO_Summary.xlsx")
+                fill_coho_template(data, xlsx_path)
+                progress_queue.append(("log",
+                    f"\n📊 Excel generated: {Path(xlsx_path).name}", "#4ade80"))
+                progress_queue.append(("prog", 95, "Saving results..."))
+
+                # Save result for result page
+                result_file = UPLOAD_DIR / f"{uid}_result.json"
+                result_file.write_text(json.dumps({
+                    "uid":      uid,
+                    "header":   {k: str(v) for k, v in header.items()},
+                    "analytics": {
+                        k: v for k, v in an.items()
+                        if k not in ("monthly_rows", "daily_closing")
+                    },
+                    "monthly_rows": [
+                        {k2: str(v2) if hasattr(v2,'strftime') else v2
+                         for k2, v2 in mr.items()}
+                        for mr in an.get("monthly_rows", [])
+                    ],
+                    "total_transactions": len(txns),
+                    "transactions": [
+                        {
+                            "date":      t["date"].isoformat(),
+                            "desc":      t["desc"],
+                            "money_in":  t["money_in"],
+                            "money_out": t["money_out"],
+                            "os_balance":t["os_balance"],
+                            "is_closing":t["date"].isoformat() in
+                                [d.isoformat() for d in an.get("daily_closing",{}).keys()]
+                                and abs(t["os_balance"] -
+                                    an.get("daily_closing",{}).get(t["date"],99999)) < 0.01
+                        }
+                        for t in txns
+                    ],
+                }))
+                progress_queue.append(("done", None, None))
+                return True
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = loop.run_in_executor(pool, run_extraction)
+
+                while not future.done():
+                    while progress_queue:
+                        item = progress_queue.pop(0)
+                        if item[0] == "log":
+                            yield log(item[1], item[2])
+                        elif item[0] == "prog":
+                            yield prog(item[1], item[2])
+                        elif item[0] == "done":
+                            break
+                    await asyncio.sleep(0.05)
+
+                # Flush remaining
+                while progress_queue:
+                    item = progress_queue.pop(0)
+                    if item[0] == "log":
+                        yield log(item[1], item[2])
+                    elif item[0] == "prog":
+                        yield prog(item[1], item[2])
+
+                await future
+
+            yield prog(100, "Complete!")
+            yield evt("done", {})
+
+        except Exception as e:
+            import traceback
+            yield log(f"\n❌ Error: {e}", "#f87171")
+            yield log(traceback.format_exc(), "#f87171")
+            yield evt("error_msg", {"msg": str(e)})
+
+    return SR(generate(), media_type="text/event-stream",
+              headers={"Cache-Control": "no-cache",
+                       "X-Accel-Buffering": "no"})
+
+
+@app.get("/result/{uid}", response_class=HTMLResponse)
+def result_page(uid: str):
+    """Show results after extraction completes."""
+    result_file = UPLOAD_DIR / f"{uid}_result.json"
+    if not result_file.exists():
         return HTMLResponse(_shell("Error",
-            f'<div class="alert alert-err">❌ Extraction failed: {e}</div>'))
+            '<div class="alert alert-err">Result not found. Please upload again.</div>'))
 
-    header = data["header"]
-    txns   = data["transactions"]
-    an     = analytics
+    result = json.loads(result_file.read_text())
+    header = result.get("header", {})
+    an     = result.get("analytics", {})
+    txns   = result.get("transactions", [])
+    monthly_rows = result.get("monthly_rows", [])
 
-    # ── Stats ─────────────────────────────────────────────────────────────
+    # ── Stats ──────────────────────────────────────────────────────────────
     stats_html = f"""
     <div class="stat-grid">
       <div class="stat">
-        <div class="stat-num">{len(txns)}</div>
+        <div class="stat-num">{result.get('total_transactions',0)}</div>
         <div class="stat-lbl">Total Transactions</div>
       </div>
       <div class="stat">
@@ -336,7 +592,7 @@ async def extract(pdf_file: UploadFile = File(...)):
       </div>
       <div class="stat">
         <div class="stat-num">{an.get('period_months',0)}</div>
-        <div class="stat-lbl">Period (Months)</div>
+        <div class="stat-lbl">Months</div>
       </div>
       <div class="stat">
         <div class="stat-num">{_fmt(an.get('reversal_amt',0))}</div>
@@ -345,78 +601,59 @@ async def extract(pdf_file: UploadFile = File(...)):
     </div>"""
 
     # ── Monthly table ──────────────────────────────────────────────────────
-    monthly_html = """
-    <table class="month-table">
-      <thead>
-        <tr>
-          <th>#</th><th>Month</th>
-          <th>Debit Trx</th><th>Debit Amt (USD)</th>
-          <th>Credit Trx</th><th>Credit Amt (USD)</th>
-          <th>Avg Closing Bal</th><th>Lowest Bal</th><th>Highest Bal</th>
-        </tr>
-      </thead>
-      <tbody>"""
-    for mr in an.get("monthly_rows",[]):
-        monthly_html += f"""
-        <tr>
-          <td>{mr['no']}</td>
-          <td>{mr['month'].strftime('%b %Y') if mr.get('month') else ''}</td>
-          <td style="color:var(--danger)">{mr['debit_trx']}</td>
-          <td style="color:var(--danger)">{mr['debit_amt']:,.2f}</td>
-          <td style="color:var(--ok)">{mr['credit_trx']}</td>
-          <td style="color:var(--ok)">{mr['credit_amt']:,.2f}</td>
-          <td>{mr['avg_bal']:,.2f}</td>
-          <td>{mr['lowest_bal']:,.2f}</td>
-          <td>{mr['highest_bal']:,.2f}</td>
+    monthly_html = """<table class="month-table">
+      <thead><tr>
+        <th>#</th><th>Month</th>
+        <th>Debit Trx</th><th>Debit Amt</th>
+        <th>Credit Trx</th><th>Credit Amt</th>
+        <th>Avg Closing</th><th>Lowest</th><th>Highest</th>
+      </tr></thead><tbody>"""
+    for mr in monthly_rows:
+        monthly_html += f"""<tr>
+          <td>{mr.get('no','')}</td>
+          <td>{mr.get('month','')[:7]}</td>
+          <td style="color:var(--danger)">{mr.get('debit_trx',0)}</td>
+          <td style="color:var(--danger)">{float(mr.get('debit_amt',0)):,.2f}</td>
+          <td style="color:var(--ok)">{mr.get('credit_trx',0)}</td>
+          <td style="color:var(--ok)">{float(mr.get('credit_amt',0)):,.2f}</td>
+          <td>{float(mr.get('avg_bal',0)):,.2f}</td>
+          <td>{float(mr.get('lowest_bal',0)):,.2f}</td>
+          <td>{float(mr.get('highest_bal',0)):,.2f}</td>
         </tr>"""
-    tot_out = an.get('total_out_amt',0)
-    tot_in  = an.get('total_in_amt',0)
-    monthly_html += f"""
-        <tr class="total-row">
-          <td colspan="2">Total</td>
-          <td style="color:var(--danger)">{an.get('total_out_trx',0)}</td>
-          <td style="color:var(--danger)">{tot_out:,.2f}</td>
-          <td style="color:var(--ok)">{an.get('total_in_trx',0)}</td>
-          <td style="color:var(--ok)">{tot_in:,.2f}</td>
-          <td colspan="3"></td>
-        </tr>
-      </tbody>
-    </table>"""
+    monthly_html += f"""<tr class="total-row">
+      <td colspan="2">Total</td>
+      <td style="color:var(--danger)">{an.get('total_out_trx',0)}</td>
+      <td style="color:var(--danger)">{float(an.get('total_out_amt',0)):,.2f}</td>
+      <td style="color:var(--ok)">{an.get('total_in_trx',0)}</td>
+      <td style="color:var(--ok)">{float(an.get('total_in_amt',0)):,.2f}</td>
+      <td colspan="3"></td>
+    </tr></tbody></table>"""
 
-    # ── Transaction table (first 100) ──────────────────────────────────────
-    daily_closing = an.get("daily_closing", {})
+    # ── Transaction preview ────────────────────────────────────────────────
     trx_rows = ""
-    for i, t in enumerate(txns[:200]):
-        is_debit   = t["money_out"] > 0
-        is_closing = (t["date"] in daily_closing and
-                      abs(t["os_balance"] - daily_closing[t["date"]]) < 0.01)
-        row_cls = "closing" if is_closing else ("debit" if is_debit else "")
-        trx_rows += f"""
-        <tr class="{row_cls}">
+    for i, t in enumerate(txns[:300]):
+        is_debit   = float(t.get("money_out",0)) > 0
+        is_closing = t.get("is_closing", False)
+        row_cls    = "closing" if is_closing else ("debit" if is_debit else "")
+        trx_rows += f"""<tr class="{row_cls}">
           <td style="text-align:center;color:var(--muted)">{i+1}</td>
-          <td style="white-space:nowrap">{t['date'].strftime('%d/%m/%Y')}</td>
-          <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis"
-              title="{t['desc']}">{t['desc'][:70]}</td>
-          <td class="amount debit">{f"{t['money_out']:,.2f}" if t['money_out'] > 0 else ''}</td>
-          <td class="amount credit">{f"{t['money_in']:,.2f}" if t['money_in'] > 0 else ''}</td>
-          <td class="amount">{t['os_balance']:,.2f}</td>
-          {'<td class="amount" style="background:#fff3cd;font-weight:700">✓</td>' if is_closing else '<td></td>'}
+          <td style="white-space:nowrap">{t['date'][:10]}</td>
+          <td title="{t['desc']}">{t['desc'][:70]}</td>
+          <td class="amount debit">{f"{float(t['money_out']):,.2f}" if float(t.get('money_out',0)) > 0 else ''}</td>
+          <td class="amount credit">{f"{float(t['money_in']):,.2f}" if float(t.get('money_in',0)) > 0 else ''}</td>
+          <td class="amount">{float(t.get('os_balance',0)):,.2f}</td>
+          <td>{"🟡" if is_closing else ""}</td>
         </tr>"""
 
-    more_msg = ""
-    if len(txns) > 200:
-        more_msg = f'<p style="text-align:center;color:var(--muted);padding:12px;font-size:12px">Showing first 200 of {len(txns)} transactions — all {len(txns)} are in the Excel download</p>'
+    more_msg = f'<p style="text-align:center;color:var(--muted);padding:10px;font-size:12px">Showing first 300 of {len(txns)} transactions</p>' \
+               if len(txns) > 300 else ""
 
-    period_from = header.get("period_from")
-    period_to   = header.get("period_to")
-    period_str  = ""
-    if period_from and period_to:
-        period_str = f"{period_from.strftime('%d %b %Y')} – {period_to.strftime('%d %b %Y')}"
+    period_str = f"{header.get('period_from','')[:10]} – {header.get('period_to','')[:10]}"
 
     body = f"""
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <div>
-        <h1 style="font-size:20px;font-weight:700">Statement Extracted Successfully</h1>
+        <h1 style="font-size:20px;font-weight:700">✅ Extraction Complete</h1>
         <p style="font-size:13px;color:var(--muted);margin-top:3px">{period_str}</p>
       </div>
       <div style="display:flex;gap:10px">
@@ -425,20 +662,11 @@ async def extract(pdf_file: UploadFile = File(...)):
       </div>
     </div>
 
-    <div class="step-indicator">
-      <div class="step done"><div class="step-dot">✓</div>
-        <div class="step-label">Upload PDF</div><div class="step-line"></div></div>
-      <div class="step done"><div class="step-dot">✓</div>
-        <div class="step-label">Extract & Analyse</div><div class="step-line"></div></div>
-      <div class="step active"><div class="step-dot">3</div>
-        <div class="step-label">Download Excel</div></div>
-    </div>
-
     <div class="card">
       <div class="card-title">Account Information</div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:12px">
         <div><span style="color:var(--muted)">Bank: </span><strong>{header.get('bank','')}</strong></div>
-        <div><span style="color:var(--muted)">Account Holder: </span><strong>{header.get('holder_name','')}</strong></div>
+        <div><span style="color:var(--muted)">Holder: </span><strong>{header.get('holder_name','')}</strong></div>
         <div><span style="color:var(--muted)">Account No: </span><strong>{header.get('account_no','')}</strong></div>
         <div><span style="color:var(--muted)">Currency: </span><strong>{header.get('currency','')}</strong></div>
         <div><span style="color:var(--muted)">Opening Balance: </span><strong>{_fmt(header.get('opening_balance',0))}</strong></div>
@@ -459,23 +687,19 @@ async def extract(pdf_file: UploadFile = File(...)):
     </div>
 
     <div class="card">
-      <div class="card-title">Transactions Preview
-        <span style="font-weight:400;color:var(--muted);margin-left:8px">
-          🟡 highlighted = daily closing balance
+      <div class="card-title">Transactions
+        <span style="font-weight:400;color:var(--muted);margin-left:8px;font-size:11px">
+          🟡 = daily closing balance
         </span>
       </div>
       <div style="overflow-x:auto">
         <table class="trx-table">
-          <thead>
-            <tr>
-              <th>#</th><th>Date</th><th>Transaction Details</th>
-              <th>Debit (USD)</th><th>Credit (USD)</th>
-              <th>O/S Balance</th><th>Closing</th>
-            </tr>
-          </thead>
-          <tbody>
-            {trx_rows}
-          </tbody>
+          <thead><tr>
+            <th>#</th><th>Date</th><th>Description</th>
+            <th>Debit (USD)</th><th>Credit (USD)</th>
+            <th>Balance</th><th></th>
+          </tr></thead>
+          <tbody>{trx_rows}</tbody>
         </table>
       </div>
       {more_msg}
@@ -485,12 +709,9 @@ async def extract(pdf_file: UploadFile = File(...)):
       <a href="/coho/download/{uid}" class="btn btn-primary btn-lg">
         ⬇ Download Filled COHO Excel Template
       </a>
-      <p style="font-size:12px;color:var(--muted);margin-top:10px">
-        Uniform Conduct of Account Summary — ready for credit analysis
-      </p>
     </div>"""
 
-    return HTMLResponse(_shell("Review", body))
+    return HTMLResponse(_shell("Results", body))
 
 
 @app.get("/download/{uid}")
