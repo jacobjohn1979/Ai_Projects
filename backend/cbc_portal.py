@@ -395,7 +395,7 @@ def progress_page(uid: str):
     fetch('/cbc/run/' + uid).catch(() => {{}});
     const timer = setInterval(async () => {{
       try {{
-        const r = await fetch('/cbc/poll/' + uid + '?from=' + from_);
+        const r = await fetch('/cbc/poll/' + uid + '?from_=' + from_);
         if (!r.ok) return;
         const d = await r.json();
         (d.logs || []).forEach(l => {{ appendLog(l.msg, l.color); from_++; }});

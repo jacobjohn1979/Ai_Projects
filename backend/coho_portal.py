@@ -351,7 +351,7 @@ def progress_page(uid: str):
     // Poll every 800ms
     const timer = setInterval(async () => {{
       try {{
-        const r = await fetch('/coho/poll/' + uid + '?from=' + from_);
+        const r = await fetch('/coho/poll/' + uid + '?from_=' + from_);
         if (!r.ok) return;
         const d = await r.json();
 
