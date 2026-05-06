@@ -297,6 +297,7 @@ function doUpload() {
 @app.post("/extract", response_class=HTMLResponse)
 async def extract(pdf_file: UploadFile = File(...)):
     """Upload PDF and redirect to progress page."""
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     uid      = str(uuid.uuid4())[:8]
     pdf_path = UPLOAD_DIR / f"{uid}_{pdf_file.filename}"
     content  = await pdf_file.read()
@@ -313,7 +314,7 @@ async def extract(pdf_file: UploadFile = File(...)):
     }))
 
     # Redirect to progress page
-    return JSONResponse({"uid": uid, "redirect": "/coho/progress/{uid}"})
+    return JSONResponse({"uid": uid, "redirect": f"/coho/progress/{uid}"})
 
 
 @app.get("/progress/{uid}", response_class=HTMLResponse)
