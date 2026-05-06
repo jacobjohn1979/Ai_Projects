@@ -332,11 +332,10 @@ function doUpload() {
   const fd = new FormData();
   fd.append('pdf_file', inp.files[0]);
   fetch('/cbc/extract', {method:'POST', body:fd})
-    .then(r => {
-      if (r.redirected) { window.location.href = r.url; return; }
-      return r.text().then(html => {
-        window.location.href = '/cbc/';
-      });
+    .then(r => r.json())
+    .then(d => {
+      if (d.redirect) { window.location.href = d.redirect; }
+      else { window.location.href = '/cbc/'; }
     })
     .catch(e => { btn.textContent = 'Upload failed: ' + e; btn.disabled = false; });
 }
@@ -360,8 +359,7 @@ async def extract(pdf_file: UploadFile = File(...)):
         "pdf_path": str(pdf_path),
         "size_mb":  round(len(content)/1024/1024, 2),
     }))
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(f"/cbc/progress/{uid}", status_code=303)
+    return JSONResponse({"uid": uid, "redirect": "/cbc/progress/{uid}"})
 
 
 @app.get("/progress/{uid}", response_class=HTMLResponse)

@@ -283,12 +283,10 @@ function doUpload() {
   const fd = new FormData();
   fd.append('pdf_file', inp.files[0]);
   fetch('/coho/extract', {method:'POST', body:fd})
-    .then(r => {
-      if (r.redirected) { window.location.href = r.url; return; }
-      // parse redirect from body if not auto-followed
-      return r.text().then(html => {
-        window.location.href = '/coho/';
-      });
+    .then(r => r.json())
+    .then(d => {
+      if (d.redirect) { window.location.href = d.redirect; }
+      else { window.location.href = '/coho/'; }
     })
     .catch(e => { btn.textContent = 'Upload failed: ' + e; btn.disabled = false; });
 }
@@ -315,8 +313,7 @@ async def extract(pdf_file: UploadFile = File(...)):
     }))
 
     # Redirect to progress page
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(f"/coho/progress/{uid}", status_code=303)
+    return JSONResponse({"uid": uid, "redirect": "/coho/progress/{uid}"})
 
 
 @app.get("/progress/{uid}", response_class=HTMLResponse)
