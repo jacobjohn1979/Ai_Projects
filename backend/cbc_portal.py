@@ -144,7 +144,7 @@ HTML_SHELL = """<!DOCTYPE html>
   <title>CBC Credit Analysis — {title}</title>
   <style>{css}</style>
 </head>
-<body>
+<body data-uid="{uid}">
   <div class="topbar">
     <div class="brand">
       <div class="brand-icon">CBC</div>
@@ -385,7 +385,7 @@ def progress_page(uid: str):
       </div>
     </div>
     <script>
-    const uid    = '{uid}';
+    const uid    = document.body.dataset.uid;
     const logBox = document.getElementById('log-box');
     const pbar   = document.getElementById('pbar');
     const statT  = document.getElementById('status-text');
