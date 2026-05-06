@@ -250,8 +250,8 @@ def index():
         </div>
 
         <div style="margin-top:16px;display:flex;gap:10px">
-          <button type="submit" class="btn btn-primary btn-lg" id="submit-btn"
-                  disabled onclick="startUpload()">
+          <button type="button" class="btn btn-primary btn-lg" id="submit-btn"
+                  disabled onclick="doUpload()">
             Extract & Generate Excel
           </button>
           <button type="button" class="btn btn-ghost" onclick="resetForm()">
@@ -322,16 +322,23 @@ function resetForm() {
   document.getElementById('submit-btn').disabled = true;
 }
 
-function startUpload() {
+function startUpload() {}
+function doUpload() {
+  const inp = document.getElementById('pdf-input');
+  if (!inp.files.length) return;
   const btn = document.getElementById('submit-btn');
-  btn.textContent = 'Extracting...';
-  btn.disabled = true;
-  let pct = 0;
-  const bar = document.getElementById('prog-bar');
-  const iv = setInterval(() => {
-    pct = Math.min(pct + Math.random()*15, 85);
-    bar.style.width = pct + '%';
-  }, 300);
+  btn.textContent = 'Uploading...'; btn.disabled = true;
+  document.getElementById('prog-bar').style.width = '30%';
+  const fd = new FormData();
+  fd.append('pdf_file', inp.files[0]);
+  fetch('/cbc/extract', {method:'POST', body:fd})
+    .then(r => {
+      if (r.redirected) { window.location.href = r.url; return; }
+      return r.text().then(html => {
+        window.location.href = '/cbc/';
+      });
+    })
+    .catch(e => { btn.textContent = 'Upload failed: ' + e; btn.disabled = false; });
 }
 </script>"""
 

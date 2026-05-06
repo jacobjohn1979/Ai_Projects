@@ -214,8 +214,8 @@ def index():
           <div class="progress"><div class="progress-bar" id="pbar"></div></div>
         </div>
         <div style="margin-top:16px;display:flex;gap:10px">
-          <button type="submit" class="btn btn-primary btn-lg"
-                  id="submit-btn" disabled onclick="startUpload()">
+          <button type="button" class="btn btn-primary btn-lg"
+                  id="submit-btn" disabled onclick="doUpload()">
             Extract & Generate Excel
           </button>
           <button type="button" class="btn btn-ghost" onclick="resetForm()">Clear</button>
@@ -273,11 +273,24 @@ function resetForm() {
   document.getElementById('file-info').style.display = 'none';
   document.getElementById('submit-btn').disabled = true;
 }
-function startUpload() {
+function startUpload() {}
+function doUpload() {
+  const inp = document.getElementById('pdf-input');
+  if (!inp.files.length) return;
   const btn = document.getElementById('submit-btn');
-  btn.textContent = 'Extracting...'; btn.disabled = true;
-  let p = 0; const bar = document.getElementById('pbar');
-  setInterval(() => { p = Math.min(p + Math.random()*12, 88); bar.style.width = p + '%'; }, 400);
+  btn.textContent = 'Uploading...'; btn.disabled = true;
+  document.getElementById('pbar').style.width = '30%';
+  const fd = new FormData();
+  fd.append('pdf_file', inp.files[0]);
+  fetch('/coho/extract', {method:'POST', body:fd})
+    .then(r => {
+      if (r.redirected) { window.location.href = r.url; return; }
+      // parse redirect from body if not auto-followed
+      return r.text().then(html => {
+        window.location.href = '/coho/';
+      });
+    })
+    .catch(e => { btn.textContent = 'Upload failed: ' + e; btn.disabled = false; });
 }
 </script>"""
     return HTMLResponse(_shell("Upload", body, scripts))
