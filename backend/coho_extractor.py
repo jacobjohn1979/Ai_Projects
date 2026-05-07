@@ -51,7 +51,7 @@ MEDIUM = Border(
 
 
 # ── Bank Profile Loader ───────────────────────────────────────────────────────
-PROFILE_DIR = Path("/app/bank_profiles")
+PROFILE_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads")) / "bank_profiles"
 
 def _load_profile_for_text(text_upper: str) -> dict | None:
     """Find a matching trained profile by scanning keywords in PDF text."""

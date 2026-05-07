@@ -171,6 +171,16 @@ services:
     networks:
       - internal
 
+  # ── Bank Format Trainer ──────────────────────────────────────────────────────
+  bank-trainer:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: uvicorn bank_trainer:app --host 0.0.0.0 --port 8009
+    volumes:
+      - uploads:/app/uploads
+    networks:
+      - internal
+
   # ── COHO Bank Statement Portal ───────────────────────────────────────────────
   coho-portal:
     <<: [*app-build, *app-env]
