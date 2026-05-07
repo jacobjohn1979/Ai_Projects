@@ -18,7 +18,7 @@ load_dotenv()
 log        = logging.getLogger("bank_trainer")
 BASE_DIR   = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 TRAIN_DIR  = BASE_DIR / "trainer"
-PROFILE_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads")) / "bank_profiles"
+PROFILE_DIR = Path("/app/bank_profiles")
 TRAIN_DIR.mkdir(parents=True, exist_ok=True)
 PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -240,7 +240,8 @@ def home():
               <div>
                 <strong>{p.get("bank_name","?")}</strong>
                 <span class="badge badge-blue" style="margin-left:8px">{p.get("swift","?")}</span>
-                <span class="badge badge-ok" style="margin-left:4px">{p.get("currency","?")}</span>
+                <span class="badge {'badge-ok' if p.get('currency')=='USD' else 'badge-warn'}" style="margin-left:4px">{p.get("currency","?")}</span>
+                <span style="color:#64748b;font-size:11px;margin-left:4px">[{p.get("profile_key","")}]</span>
                 <span style="color:#64748b;font-size:12px;margin-left:8px">
                   Date: {p.get("date_pattern","?")} · 
                   Cols: {p.get("col_balance","?")} balance
@@ -249,7 +250,7 @@ def home():
               <div style="display:flex;gap:8px">
                 <a href="/trainer/test/{p.get("swift","")}" class="btn btn-ghost" 
                    style="padding:6px 12px;font-size:12px">Test</a>
-                <button onclick="deleteProfile('{p.get("swift","")}')" 
+                <button onclick="deleteProfile('{p.get("profile_key", p.get("swift",""))}')" 
                         class="btn btn-danger" style="padding:6px 12px;font-size:12px">Delete</button>
               </div>
             </div>"""
@@ -598,11 +599,15 @@ async def save_profile(request: Request):
     try:
         profile  = await request.json()
         swift    = profile.get("swift","").upper()
+        currency = profile.get("currency","USD").upper()
         if not swift:
             return JSONResponse({"error": "SWIFT code required"})
-        prof_path = PROFILE_DIR / (swift + ".json")
+        # Use SWIFT_CURRENCY as filename so USD and KHR profiles coexist
+        profile_key = swift + "_" + currency if currency != "BOTH" else swift + "_BOTH"
+        profile["profile_key"] = profile_key
+        prof_path = PROFILE_DIR / (profile_key + ".json")
         prof_path.write_text(json.dumps(profile, indent=2))
-        return JSONResponse({"ok": True, "swift": swift})
+        return JSONResponse({"ok": True, "swift": swift, "profile_key": profile_key})
     except Exception as e:
         return JSONResponse({"error": str(e)})
 
@@ -842,11 +847,16 @@ def profiles():
     return HTMLResponse(page("Profiles", body))
 
 
-@app.delete("/profile/{swift}")
-def delete_profile(swift: str):
-    f = PROFILE_DIR / (swift.upper() + ".json")
+@app.delete("/profile/{profile_key}")
+def delete_profile(profile_key: str):
+    # profile_key can be SWIFT, SWIFT_USD, SWIFT_KHR, SWIFT_BOTH
+    f = PROFILE_DIR / (profile_key.upper() + ".json")
     if f.exists():
         f.unlink()
+        return JSONResponse({"ok": True})
+    # Try legacy SWIFT-only filename
+    for f2 in PROFILE_DIR.glob(profile_key.upper() + "*.json"):
+        f2.unlink()
     return JSONResponse({"ok": True})
 
 

@@ -51,31 +51,43 @@ MEDIUM = Border(
 
 
 # ── Bank Profile Loader ───────────────────────────────────────────────────────
-PROFILE_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads")) / "bank_profiles"
+PROFILE_DIR = Path("/app/bank_profiles")
 
-def _load_profile_for_text(text_upper: str) -> dict | None:
-    """Find a matching trained profile by scanning keywords in PDF text."""
+def _load_profiles_for_text(text_upper: str) -> list:
+    """Find all matching trained profiles for this PDF (may have USD + KHR)."""
     if not PROFILE_DIR.exists():
-        return None
-    for f in PROFILE_DIR.glob("*.json"):
+        return []
+    matched = []
+    for f in sorted(PROFILE_DIR.glob("*.json")):
         try:
             p = json.loads(f.read_text())
             swift = p.get("swift","").upper()
             if swift and swift in text_upper:
-                return p
+                matched.append(p)
+                continue
             for kw in p.get("keywords",[]):
                 if kw.upper() in text_upper:
-                    return p
+                    matched.append(p)
+                    break
         except: pass
-    return None
+    return matched
 
-def _load_profile_by_swift(swift: str) -> dict | None:
-    """Load a specific profile by SWIFT code."""
-    f = PROFILE_DIR / (swift.upper() + ".json")
+def _load_profile_for_text(text_upper: str) -> dict | None:
+    """Find first matching trained profile (legacy single-profile support)."""
+    results = _load_profiles_for_text(text_upper)
+    return results[0] if results else None
+
+def _load_profile_by_key(profile_key: str) -> dict | None:
+    """Load a specific profile by its key (SWIFT_CURRENCY)."""
+    f = PROFILE_DIR / (profile_key.upper() + ".json")
     if f.exists():
         try: return json.loads(f.read_text())
         except: pass
     return None
+
+def _load_profile_by_swift(swift: str) -> dict | None:
+    """Load profile by SWIFT — returns first match (legacy)."""
+    return _load_profile_by_key(swift)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -108,10 +120,11 @@ class BankStatementParser:
 
     def _detect_bank(self) -> str:
         p = self.full_text.upper()
-        # Check trained profiles first
-        profile = _load_profile_for_text(p)
-        if profile:
-            return "PROFILE:" + profile["swift"]
+        # Check trained profiles first — may have multiple (USD + KHR)
+        profiles = _load_profiles_for_text(p)
+        if profiles:
+            keys = ",".join(pr.get("profile_key", pr.get("swift","")) for pr in profiles)
+            return "PROFILES:" + keys
         # Built-in detection by SWIFT code (most reliable)
         if "ABAAKHPP"    in p: return "ABA"
         if "WIGCKHPPXXX" in p: return "WING"
@@ -239,13 +252,23 @@ class BankStatementParser:
 
     def _parse_transactions(self) -> list[dict]:
         bank = self._detect_bank()
-        # Use trained profile if available
-        if bank.startswith("PROFILE:"):
-            swift   = bank[8:]
-            profile = _load_profile_by_swift(swift)
-            if profile:
-                from bank_trainer import _parse_with_profile
-                return _parse_with_profile(self.pages, profile)
+        # Use trained profiles if available (may be multiple for USD+KHR)
+        if bank.startswith("PROFILES:"):
+            keys     = bank[9:].split(",")
+            all_txns = []
+            for key in keys:
+                profile = _load_profile_by_key(key.strip())
+                if profile:
+                    try:
+                        from bank_trainer import _parse_with_profile
+                        txns = _parse_with_profile(self.pages, profile)
+                        all_txns.extend(txns)
+                    except Exception as e:
+                        pass
+            if all_txns:
+                # Sort by date
+                all_txns.sort(key=lambda t: t["date"])
+                return all_txns
         if bank == "WING":
             return self._parse_wing()
         elif bank == "ACLEDA":
