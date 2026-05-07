@@ -76,62 +76,102 @@ class BankStatementParser:
                 self.pages.append(text)
         self.full_text = "\n".join(self.pages)
 
-    # ── Account header ─────────────────────────────────────────────────────
+    def _detect_bank(self) -> str:
+        p = self.full_text.upper()
+        # Must check SWIFT codes first — most reliable
+        if "ABAAKHPP" in p:
+            return "ABA"
+        if "WIGCKHPPXXX" in p:
+            return "WING"
+        if "ACLEDA" in p or "ACLBKHPP" in p:
+            return "ACLEDA"
+        if "PRINCE BANK" in p or "PPCBKHPP" in p:
+            return "PRINCE"
+        if "VATTANAC" in p:
+            return "VATTANAC"
+        return "GENERIC"
 
     def _parse_header(self) -> dict:
-        h = {}
-        p = self.full_text
+        h    = {}
+        p    = self.full_text
+        bank = self._detect_bank()
 
-        # Bank name — ABA Bank detected from SWIFT code first
-        if "ABAAKHPP" in p:
-            h["bank"] = "ABA"
-        else:
-            for bank in ["ABA BANK","ACLEDA","PRINCE BANK","VATTANAC",
-                         "PRASAC","WING","WOORI","MAYBANK","CANADIA"]:
-                if bank.upper() in p.upper():
-                    h["bank"] = bank.title().replace("Aba","ABA")
-                    break
-        h.setdefault("bank", "Unknown Bank")
+        if bank == "WING":
+            h["bank"] = "Wing Bank"
+            m = re.search(r"Account Number[:\s]+(\d+)", p)
+            h["account_no"] = m.group(1).strip() if m else ""
+            m = re.search(r"Account Currency[:\s]+(\w+)", p)
+            h["currency"] = m.group(1).strip() if m else "USD"
+            m = re.search(r"Account Type[:\s]+(\w+)", p)
+            h["account_type"] = m.group(1).strip() if m else ""
+            m = re.search(r"For period\s+([\d\-A-Za-z]+)\s*-\s*([\d\-A-Za-z]+)", p)
+            if m:
+                h["period_from"] = self._parse_date_wing(m.group(1).strip())
+                h["period_to"]   = self._parse_date_wing(m.group(2).strip())
+            m = re.search(r"Opening Balance[:\s]+([\d,\.]+)", p)
+            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"Total Credit[:\s]+([\d,\.]+)", p)
+            h["total_in"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"Total Debit[:\s]+\-?([\d,\.]+)", p)
+            h["total_out"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"Ending Balance[:\s]+([\d,\.]+)", p)
+            h["ending_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+            h["holder_name"] = p.strip().split("\n")[0].strip()[:50]
 
-        # Period
-        m = re.search(r"For period[:\s]+(\w+\s+\d+,\s+\d{4})\s*[–-]+\s*(\w+\s+\d+,\s+\d{4})", p)
-        if m:
-            h["period_from_raw"] = m.group(1).strip()
-            h["period_to_raw"]   = m.group(2).strip()
-            h["period_from"]     = self._parse_date(m.group(1))
-            h["period_to"]       = self._parse_date(m.group(2))
+        elif bank == "ACLEDA":
+            h["bank"] = "ACLEDA Bank"
+            m = re.search(r"Account Number\s*:\s*(\S+)", p)
+            h["account_no"] = m.group(1).strip() if m else ""
+            m = re.search(r"Currency\s*:\s*(\w+)", p)
+            h["currency"] = m.group(1).strip() if m else "KHR"
+            m = re.search(r"Statement Period\s*:\s*([\d/]+)\s*to\s*([\d/]+)", p)
+            if m:
+                h["period_from"] = self._parse_date_dmy(m.group(1).strip())
+                h["period_to"]   = self._parse_date_dmy(m.group(2).strip())
+            m = re.search(r"Name\s*:\s*([A-Z][A-Z\s]+)", p)
+            h["holder_name"] = m.group(1).strip()[:50] if m else ""
+            h["opening_balance"] = 0.0
+            h["total_in"]  = 0.0
+            h["total_out"] = 0.0
+            m = re.search(r"Balance at Period End\s+([\d,\.]+)", p)
+            h["ending_balance"] = float(m.group(1).replace(",","")) if m else 0.0
 
-        # Account details
-        patterns = {
-            "holder_name":  r"Account Holder Name\s+(.+?)(?:\n|Account Type)",
-            "account_type": r"Account Type\s+(.+?)(?:\n|Account No)",
-            "account_no":   r"Account No\.\s+(\S+)",
-            "currency":     r"Account Currency\s+(\w+)",
-            "swift":        r"Bank SWIFT Code\s+(\w+)",
-        }
-        for key, pat in patterns.items():
-            m2 = re.search(pat, p, re.IGNORECASE | re.DOTALL)
-            h[key] = m2.group(1).strip()[:50] if m2 else ""
+        else:  # ABA / Generic
+            h["bank"] = "ABA" if "ABAAKHPP" in p.upper() else "Unknown"
+            m = re.search(r"Account Holder Name\s+(.+?)(?:\n|Account Type)", p, re.IGNORECASE|re.DOTALL)
+            h["holder_name"] = m.group(1).strip()[:50] if m else ""
+            m = re.search(r"Account No\.\s+(\S+)", p)
+            h["account_no"] = m.group(1).strip() if m else ""
+            m = re.search(r"Account Currency\s+(\w+)", p)
+            h["currency"] = m.group(1).strip() if m else "USD"
+            m = re.search(r"For period[:\s]+([\w\s,]+)\s*[–-]+\s*([\w\s,]+)", p)
+            if m:
+                h["period_from"] = self._parse_date(m.group(1).strip())
+                h["period_to"]   = self._parse_date(m.group(2).strip())
+            m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
+            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"Total Money In\s*\+\s*([\d,\.]+)", p)
+            h["total_in"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"Total Money Out\s*-\s*([\d,\.]+)", p)
+            h["total_out"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"Ending Balance\s+([\d,\.]+)", p)
+            h["ending_balance"] = float(m.group(1).replace(",","")) if m else 0.0
 
-        # Balances
-        m3 = re.search(r"Opening Balance\s+([\d,\.]+)\s+\w+", p)
-        h["opening_balance"] = float(m3.group(1).replace(",","")) if m3 else 0.0
-
-        m4 = re.search(r"Total Money In\s*\+\s*([\d,\.]+)", p)
-        h["total_in"] = float(m4.group(1).replace(",","")) if m4 else 0.0
-
-        m5 = re.search(r"Total Money Out\s*-\s*([\d,\.]+)", p)
-        h["total_out"] = float(m5.group(1).replace(",","")) if m5 else 0.0
-
-        m6 = re.search(r"Ending Balance\s+([\d,\.]+)\s+\w+", p)
-        h["ending_balance"] = float(m6.group(1).replace(",","")) if m6 else 0.0
-
+        h.setdefault("holder_name",     "")
+        h.setdefault("account_no",      "")
+        h.setdefault("currency",        "USD")
+        h.setdefault("opening_balance", 0.0)
+        h.setdefault("total_in",        0.0)
+        h.setdefault("total_out",       0.0)
+        h.setdefault("ending_balance",  0.0)
+        h.setdefault("period_from",     None)
+        h.setdefault("period_to",       None)
+        h["bank_type"] = bank
         return h
 
     def _parse_date(self, s: str) -> date | None:
-        """Parse date strings like 'Aug 01, 2025' or 'Jan 31, 2026'."""
+        """ABA format: Aug 01, 2025"""
         s = s.strip()
-        # "Aug 01, 2025"
         m = re.match(r"(\w{3})\s+(\d{1,2}),?\s+(\d{4})", s)
         if m:
             mon = self.MONTH_MAP.get(m.group(1).lower())
@@ -139,17 +179,231 @@ class BankStatementParser:
                 return date(int(m.group(3)), mon, int(m.group(2)))
         return None
 
-    # ── Transaction parser ─────────────────────────────────────────────────
+    def _parse_date_wing(self, s: str) -> date | None:
+        """Wing format: 22-Apr-2026 or 06-Feb-2026"""
+        m = re.match(r"(\d{1,2})-([A-Za-z]{3})-(\d{4})", s.strip())
+        if m:
+            mon = self.MONTH_MAP.get(m.group(2).lower())
+            if mon:
+                return date(int(m.group(3)), mon, int(m.group(1)))
+        return None
+
+    def _parse_date_dmy(self, s: str) -> date | None:
+        """ACLEDA format: 01/02/23 (DD/MM/YY)"""
+        m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", s.strip())
+        if m:
+            day, mon, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if yr < 100:
+                yr += 2000
+            return date(yr, mon, day)
+        return None
+
+    def _parse_date_acleda_row(self, s: str) -> date | None:
+        """ACLEDA row date: 24 MAR 23"""
+        m = re.match(r"(\d{1,2})\s+([A-Z]{3})\s+(\d{2})", s.strip())
+        if m:
+            mon = self.MONTH_MAP.get(m.group(2).lower())
+            yr  = int(m.group(3)) + 2000
+            if mon:
+                return date(yr, mon, int(m.group(1)))
+        return None
 
     def _parse_transactions(self) -> list[dict]:
+        bank = self._detect_bank()
+        if bank == "WING":
+            return self._parse_wing()
+        elif bank == "ACLEDA":
+            return self._parse_acleda()
+        else:
+            return self._parse_aba()
+
+    # ── Wing Bank ─────────────────────────────────────────────────────────────
+
+    def _parse_wing(self) -> list[dict]:
         """
-        Parse ABA Bank statement.
-        Each transaction is ONE line in the PDF:
-          "Aug 01, 2025 DESCRIPTION  10.63 USD  USD  222.64 USD"  ← credit
-          "Aug 01, 2025 DESCRIPTION  USD  98.00 USD  214.53 USD"  ← debit
-        Amounts are always at the END of the line.
-        Balance is always the LAST amount.
+        Wing Bank PDF has two date patterns:
+          Pattern A: date alone on line, amounts on next line
+            14: 'Direct Bank Transfer from'
+            15: '22-Apr-2026'
+            16: '004 EWJ608421 001214686 JOHN JACOB, MR - 640.00 687.37'
+            17: '08:17:18 PM'
+            18: 'Vattanac Bank e053e12e'
+
+          Pattern B: date + description on same line, amounts on next line
+            19: '30-Apr-2026 Saving Interest from'
+            20: '004 004IRFHUSD000002 - 0.02 687.39'
+            21: '09:33:48 PM 100536313'
+
+        Amount line format: branch ref description - credit balance
+        '-' in debit position means no debit (all credits in this sample)
+        Last number = balance, second-to-last = transaction amount
         """
+        transactions = []
+        # Match date at start of line, with optional description after
+        DATE_RE = re.compile(r"^(\d{2}-[A-Za-z]{3}-\d{4})(.*)")
+        TIME_RE = re.compile(r"\d{2}:\d{2}:\d{2}\s*[AP]M")
+        AMT_RE  = re.compile(r"([\d,]+\.\d{2})")
+
+        SKIP = {"Ending Balance","Wing Bank","PAGE","Balance in","ACCOUNT SUMMARY",
+                "ACCOUNT INFORMATION","Opening Balance","Total Credit","Total Debit",
+                "Available Balance","Blocked Balance","Bank Swift","Account Number",
+                "Account Currency","Account Type","For period"}
+
+        for page_text in self.pages:
+            lines = [l.strip() for l in page_text.split("\n")]
+            i = 0
+            prev_desc = ""
+
+            while i < len(lines):
+                line = lines[i]
+
+                # Skip header/footer lines
+                if any(s in line for s in SKIP):
+                    prev_desc = ""
+                    i += 1
+                    continue
+
+                dm = DATE_RE.match(line)
+                if dm:
+                    trx_date   = self._parse_date_wing(dm.group(1))
+                    inline_desc = dm.group(2).strip()
+                    i += 1
+
+                    # Collect body lines until next date or end markers
+                    body_lines = []
+                    while i < len(lines):
+                        nl = lines[i]
+                        if DATE_RE.match(nl):
+                            break
+                        if any(s in nl for s in SKIP):
+                            break
+                        body_lines.append(nl)
+                        i += 1
+
+                    body = " ".join(body_lines)
+
+                    # Find all decimal amounts in body
+                    amounts = [float(m.group(1).replace(",",""))
+                               for m in AMT_RE.finditer(body)
+                               if float(m.group(1).replace(",","")) > 0]
+
+                    if len(amounts) < 2:
+                        # Try prev_desc + inline_desc as clue, skip
+                        prev_desc = inline_desc or prev_desc
+                        continue
+
+                    balance = amounts[-1]
+                    amount  = amounts[-2]
+
+                    # Build description
+                    desc_parts = [x for x in [prev_desc, inline_desc] if x]
+                    desc_raw   = " ".join(desc_parts) + " " + body
+                    desc = TIME_RE.sub('', desc_raw)
+                    desc = re.sub(r'\b\d{3}\b', '', desc)        # branch code
+                    desc = re.sub(r'\b[A-Z0-9]{8,}\b', '', desc) # ref numbers
+                    desc = AMT_RE.sub('', desc)                   # amounts
+                    desc = re.sub(r'\s+-\s*', ' ', desc)
+                    desc = re.sub(r'\s+', ' ', desc).strip(' -,.')[:100]
+
+                    # Direction — Wing uses '-' in debit col for credits
+                    rl = (inline_desc + " " + body).lower()
+                    is_debit = any(x in rl for x in ["fee","charge","payment to","transfer to","withdrawal"])
+
+                    if trx_date and amount > 0:
+                        transactions.append({
+                            "date":      trx_date,
+                            "desc":      desc,
+                            "money_in":  0.0 if is_debit else round(amount, 2),
+                            "money_out": round(amount, 2) if is_debit else 0.0,
+                            "balance":   round(balance, 2),
+                        })
+                    prev_desc = ""
+
+                elif not TIME_RE.search(line) and len(line) > 3:
+                    prev_desc = line
+                    i += 1
+                else:
+                    i += 1
+
+        return transactions
+
+    # ── ACLEDA Bank ───────────────────────────────────────────────────────────
+
+    def _parse_acleda(self) -> list[dict]:
+        """
+        ACLEDA format (text-based PDF):
+          24 MAR 23  Description  Ref  24 MAR 23  [debit]  [credit]  balance
+        POST DATE | DESC | REF | VALUE DATE | DEBIT | CREDIT | BALANCE
+        Only two or three numbers at end — balance always last.
+        """
+        transactions = []
+        DATE_RE = re.compile(r"^(\d{1,2}\s+[A-Z]{3}\s+\d{2})\s+(.*)")
+        AMT_RE  = re.compile(r"([\d,]+\.?\d*)")
+
+        for page_text in self.pages:
+            lines = [l.strip() for l in page_text.split("\n")]
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                dm   = DATE_RE.match(line)
+                if dm:
+                    trx_date = self._parse_date_acleda_row(dm.group(1))
+                    rest = dm.group(2)
+                    # Collect continuation lines
+                    j = i + 1
+                    while j < len(lines):
+                        nl = lines[j]
+                        if DATE_RE.match(nl):
+                            break
+                        if any(x in nl for x in ["Page ", "Balance at Period", "ACLEDA", "This is"]):
+                            break
+                        rest += " " + nl
+                        j += 1
+                    i = j
+
+                    if not trx_date:
+                        continue
+
+                    # All numeric amounts
+                    nums = [(m.start(), float(m.group(1).replace(",","")))
+                            for m in AMT_RE.finditer(rest)
+                            if "." in m.group(1) and float(m.group(1).replace(",","")) > 0]
+
+                    if len(nums) < 2:
+                        continue
+
+                    balance = nums[-1][1]
+                    amount  = nums[-2][1]
+
+                    # Direction from description
+                    rl = rest.lower()
+                    is_credit = any(x in rl for x in ["credit", "from-", "from -", "interest", "qr payment credit"])
+                    is_debit  = any(x in rl for x in ["debit", "own account", "to -", "fee charge", "qr payment debit", "bakong"])
+
+                    if not is_credit and not is_debit:
+                        is_credit = True  # default
+
+                    # Clean description
+                    desc = re.sub(r'\b\d{11,}\b', '', rest)
+                    desc = re.sub(r'\b\d{1,2}\s+[A-Z]{3}\s+\d{2}\b', '', desc)
+                    desc = re.sub(r'([\d,]+\.?\d*)', '', desc)
+                    desc = re.sub(r'\s+', ' ', desc).strip()[:100]
+
+                    if amount > 0:
+                        transactions.append({
+                            "date":      trx_date,
+                            "desc":      desc,
+                            "money_in":  round(amount, 2) if is_credit else 0.0,
+                            "money_out": round(amount, 2) if is_debit  else 0.0,
+                            "balance":   round(balance, 2),
+                        })
+                else:
+                    i += 1
+
+        return transactions
+
+    def _parse_aba(self) -> list[dict]:
+        """ABA Bank: Aug 01, 2025 DESCRIPTION 10.63 USD USD 222.64 USD"""
         transactions = []
         DATE_RE = re.compile(r"^([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})\s+(.*)")
         AMT_RE  = re.compile(r"(\d[\d,]*\.?\d*)\s+USD")
@@ -160,70 +414,36 @@ class BankStatementParser:
                 m    = DATE_RE.match(line)
                 if not m:
                     continue
-
                 trx_date = self._parse_date(m.group(1))
                 rest     = m.group(2).strip()
-
-                if any(x in rest for x in [
-                    "Advanced Bank","info@aba","Page ",
-                    "Transaction Details","Money In","Money Out",
-                    "Ending Balance","Total ","DISCLAIMER"
-                ]):
+                if any(x in rest for x in ["Advanced Bank","info@aba","Page ","Ending Balance","Total ","DISCLAIMER"]):
                     continue
-
-                # Remove Khmer chars and illegal bytes before parsing
                 rest = re.sub(r'[\u1780-\u17ff\u19e0-\u19ff\u0000-\u0008]+', '', rest)
-
-                # All "number USD" matches in order
                 amt_matches = [(m2.start(), float(m2.group(1).replace(",","")))
                                for m2 in AMT_RE.finditer(rest)]
-
                 if len(amt_matches) < 2:
                     continue
-
-                balance   = amt_matches[-1][1]    # always last
-                txn_start = amt_matches[-2][0]    # description ends here
-
-                # Transaction amount = second-to-last number
-                txn_amt = amt_matches[-2][1]
-
-                # Debit or credit?
-                # Check if "USD" appears before the second-to-last number
+                balance   = amt_matches[-1][1]
+                txn_amt   = amt_matches[-2][1]
+                txn_start = amt_matches[-2][0]
                 chunk_before = rest[:txn_start]
                 usd_before   = bool(re.search(r'\bUSD\b', chunk_before))
-
-                if usd_before:
-                    money_out, money_in = txn_amt, 0.0
-                else:
-                    money_in, money_out = txn_amt, 0.0
-
-                # Description = everything before the transaction amount
+                money_out = txn_amt if usd_before else 0.0
+                money_in  = txn_amt if not usd_before else 0.0
                 desc = chunk_before
-                desc = re.sub(r'ORIGINAL AMOUNT$', '', desc)
-                desc = re.sub(r'\bON\s+\w+\s+\d+,?\s*\d*\s*$', '', desc)
-                desc = re.sub(r'\s*\d{2}:\d{2}\s*[AP]M\s*$', '', desc)
-                desc = re.sub(r'REF#\s*\S+', '', desc)
-                desc = re.sub(r'TRAN#\s*\S+', '', desc)
-                desc = re.sub(r'HASH#\s*[0-9a-fA-F]+', '', desc)
-                desc = re.sub(r'BAKONG#\s*[0-9a-fA-F]+', '', desc)
-                desc = re.sub(r'EXT#\s*\S+', '', desc)
-                desc = re.sub(r'APV\s*\S+', '', desc)
-                desc = re.sub(r'TID:\s*\S+', '', desc)
-                desc = re.sub(r'PURCHASE#\s*\S+', '', desc)
-                desc = re.sub(r'\|[^|]+\|', '', desc)
-                desc = re.sub(r'\bUSD\b', '', desc)
-                desc = re.sub(r'\s+', ' ', desc).strip().strip('|\\/. ')
-                desc = desc[:100]
-
+                for pat in [r'ORIGINAL AMOUNT$',r'REF#\s*\S+',r'TRAN#\s*\S+',
+                            r'HASH#\s*[0-9a-fA-F]+',r'BAKONG#\s*[0-9a-fA-F]+',
+                            r'EXT#\s*\S+',r'APV\s*\S+',r'TID:\s*\S+',
+                            r'PURCHASE#\s*\S+',r'\|[^|]+\|',r'\bUSD\b']:
+                    desc = re.sub(pat, '', desc)
+                desc = re.sub(r'\s+', ' ', desc).strip().strip('|\\/. ')[:100]
                 if trx_date and txn_amt > 0:
                     transactions.append({
-                        "date":      trx_date,
-                        "desc":      desc,
+                        "date": trx_date, "desc": desc,
                         "money_in":  round(money_in, 2),
                         "money_out": round(money_out, 2),
                         "balance":   round(balance, 2),
                     })
-
         return transactions
 
     # ── Main parse ─────────────────────────────────────────────────────────
