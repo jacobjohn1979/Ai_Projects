@@ -18,7 +18,7 @@ load_dotenv()
 log        = logging.getLogger("bank_trainer")
 BASE_DIR   = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 TRAIN_DIR  = BASE_DIR / "trainer"
-PROFILE_DIR = Path("/app/bank_profiles")
+PROFILE_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads")) / "bank_profiles"
 TRAIN_DIR.mkdir(parents=True, exist_ok=True)
 PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
