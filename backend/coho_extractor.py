@@ -15,6 +15,7 @@ Usage (as module):
 """
 
 import re
+import json
 import sys
 import os
 from datetime import datetime, date
@@ -48,6 +49,35 @@ MEDIUM = Border(
 )
 
 
+
+# ── Bank Profile Loader ───────────────────────────────────────────────────────
+PROFILE_DIR = Path("/app/bank_profiles")
+
+def _load_profile_for_text(text_upper: str) -> dict | None:
+    """Find a matching trained profile by scanning keywords in PDF text."""
+    if not PROFILE_DIR.exists():
+        return None
+    for f in PROFILE_DIR.glob("*.json"):
+        try:
+            p = json.loads(f.read_text())
+            swift = p.get("swift","").upper()
+            if swift and swift in text_upper:
+                return p
+            for kw in p.get("keywords",[]):
+                if kw.upper() in text_upper:
+                    return p
+        except: pass
+    return None
+
+def _load_profile_by_swift(swift: str) -> dict | None:
+    """Load a specific profile by SWIFT code."""
+    f = PROFILE_DIR / (swift.upper() + ".json")
+    if f.exists():
+        try: return json.loads(f.read_text())
+        except: pass
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PART 1 — PDF PARSER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -78,17 +108,16 @@ class BankStatementParser:
 
     def _detect_bank(self) -> str:
         p = self.full_text.upper()
-        # Must check SWIFT codes first — most reliable
-        if "ABAAKHPP" in p:
-            return "ABA"
-        if "WIGCKHPPXXX" in p:
-            return "WING"
-        if "ACLEDA" in p or "ACLBKHPP" in p:
-            return "ACLEDA"
-        if "PRINCE BANK" in p or "PPCBKHPP" in p:
-            return "PRINCE"
-        if "VATTANAC" in p:
-            return "VATTANAC"
+        # Check trained profiles first
+        profile = _load_profile_for_text(p)
+        if profile:
+            return "PROFILE:" + profile["swift"]
+        # Built-in detection by SWIFT code (most reliable)
+        if "ABAAKHPP"    in p: return "ABA"
+        if "WIGCKHPPXXX" in p: return "WING"
+        if "ACLEDA"      in p or "ACLBKHPP" in p: return "ACLEDA"
+        if "PRINCE BANK" in p or "PPCBKHPP" in p: return "PRINCE"
+        if "VATTANAC"    in p: return "VATTANAC"
         return "GENERIC"
 
     def _parse_header(self) -> dict:
@@ -210,6 +239,13 @@ class BankStatementParser:
 
     def _parse_transactions(self) -> list[dict]:
         bank = self._detect_bank()
+        # Use trained profile if available
+        if bank.startswith("PROFILE:"):
+            swift   = bank[8:]
+            profile = _load_profile_by_swift(swift)
+            if profile:
+                from bank_trainer import _parse_with_profile
+                return _parse_with_profile(self.pages, profile)
         if bank == "WING":
             return self._parse_wing()
         elif bank == "ACLEDA":
