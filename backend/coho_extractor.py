@@ -58,18 +58,34 @@ def _load_profiles_for_text(text_upper: str) -> list:
     if not PROFILE_DIR.exists():
         return []
     matched = []
+    seen    = set()
     for f in sorted(PROFILE_DIR.glob("*.json")):
         try:
-            p = json.loads(f.read_text())
-            swift = p.get("swift","").upper()
-            if swift and swift in text_upper:
-                matched.append(p)
+            p        = json.loads(f.read_text())
+            prof_key = p.get("profile_key", p.get("swift", f.stem))
+            if prof_key in seen:
                 continue
-            for kw in p.get("keywords",[]):
-                if kw.upper() in text_upper:
+            swift    = p.get("swift","").upper()
+            keywords = [k.upper() for k in (p.get("keywords") or []) if k]
+            # Add swift and bank name words as implicit keywords
+            if swift and swift not in keywords:
+                keywords.append(swift)
+            for w in p.get("bank_name","").upper().split():
+                if len(w) > 3 and w not in keywords:
+                    keywords.append(w)
+            # Check all keywords
+            for kw in keywords:
+                if kw and kw in text_upper:
                     matched.append(p)
+                    seen.add(prof_key)
                     break
-        except: pass
+            # Special: Woori has no SWIFT — detect by unique field names
+            if prof_key not in seen and "CID" in text_upper and "ACCOUNTNUMBER" in text_upper.replace(" ",""):
+                if "WOORI" in p.get("bank_name","").upper() or "HVBK" in swift:
+                    matched.append(p)
+                    seen.add(prof_key)
+        except:
+            pass
     return matched
 
 def _load_profile_for_text(text_upper: str) -> dict | None:
