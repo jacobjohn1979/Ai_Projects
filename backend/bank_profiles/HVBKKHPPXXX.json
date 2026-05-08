@@ -1,0 +1,15 @@
+{
+  "uid": "c9d54d53",
+  "bank_name": "Woori Bank",
+  "swift": "HVBKKHPPXXX",
+  "currency": "USD",
+  "date_pattern": "DD MON YY",
+  "date_location": "start_of_line",
+  "col_order": "date_desc_debit_credit_balance",
+  "empty_marker": "-",
+  "debit_keywords": "transfer to,payment to,fee,charge,withdrawal,debit,qr payment debit",
+  "skip_keywords": "page ,balance at period,this is a computer,swift code,statement period",
+  "notes": "",
+  "filename": "7. Woori Statement USD.pdf",
+  "created_at": "2026-05-08T09:24:41.733Z"
+}

@@ -1,0 +1,15 @@
+{
+  "uid": "b166be80",
+  "bank_name": "ACLEDA Bank",
+  "swift": "ACLBKHPP",
+  "currency": "KHR",
+  "date_pattern": "DD MON YY",
+  "date_location": "start_of_line",
+  "col_order": "date_desc_debit_credit_balance",
+  "empty_marker": "-",
+  "debit_keywords": "transfer to,payment to,fee,charge,withdrawal,debit,qr payment debit",
+  "skip_keywords": "page ,balance at period,this is a computer,swift code,statement period",
+  "notes": "",
+  "filename": "3. Acleda Statement KHR.pdf",
+  "created_at": "2026-05-08T08:59:25.575Z"
+}
