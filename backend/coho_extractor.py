@@ -136,17 +136,30 @@ class BankStatementParser:
 
     def _detect_bank(self) -> str:
         p = self.full_text.upper()
-        # Check trained profiles first — may have multiple (USD + KHR)
+
+        # Check trained profiles first
         profiles = _load_profiles_for_text(p)
         if profiles:
             keys = ",".join(pr.get("profile_key", pr.get("swift","")) for pr in profiles)
             return "PROFILES:" + keys
+
         # Built-in detection by SWIFT code (most reliable)
         if "ABAAKHPP"    in p: return "ABA"
         if "WIGCKHPPXXX" in p: return "WING"
-        if "ACLEDA"      in p or "ACLBKHPP" in p: return "ACLEDA"
-        if "PRINCE BANK" in p or "PPCBKHPP" in p: return "PRINCE"
-        if "VATTANAC"    in p: return "VATTANAC"
+        if "ACLBKHPP"    in p: return "ACLEDA"
+        if "ACLEDA"      in p: return "ACLEDA"
+        # ACLEDA KHR PDFs render as garbled (cid:xx) but contain ACLBKHPP in metadata
+        if "acledabank" in self.full_text.lower(): return "ACLEDA"
+        if "PPCBKHPP"   in p: return "PRINCE"
+        if "VATTANAC"   in p: return "VATTANAC"
+
+        # Woori: no SWIFT but has unique field names
+        if "CID" in p and "ACCOUNTNUMBER" in p.replace(" ",""):
+            return "WOORI"
+        # Philip Bank
+        if "PHILLIP" in p or "PHILIP BANK" in p:
+            return "PHILIP"
+
         return "GENERIC"
 
     def _parse_header(self) -> dict:
@@ -278,6 +291,13 @@ class BankStatementParser:
                     try:
                         from bank_trainer import _parse_with_profile
                         txns = _parse_with_profile(self.pages, profile)
+                        # Convert string dates to date objects
+                        for t in txns:
+                            if isinstance(t.get("date"), str):
+                                try:
+                                    from datetime import datetime
+                                    t["date"] = datetime.strptime(t["date"][:10], "%Y-%m-%d").date()
+                                except: pass
                         all_txns.extend(txns)
                     except Exception as e:
                         pass
@@ -285,12 +305,11 @@ class BankStatementParser:
                 # Sort by date
                 all_txns.sort(key=lambda t: t["date"])
                 return all_txns
-        if bank == "WING":
-            return self._parse_wing()
-        elif bank == "ACLEDA":
-            return self._parse_acleda()
-        else:
-            return self._parse_aba()
+        if bank == "WING":      return self._parse_wing()
+        elif bank == "ACLEDA":  return self._parse_acleda()
+        elif bank == "WOORI":   return self._parse_woori()
+        elif bank == "PHILIP":  return self._parse_philip()
+        else:                   return self._parse_aba()
 
     # ── Wing Bank ─────────────────────────────────────────────────────────────
 
@@ -477,6 +496,105 @@ class BankStatementParser:
 
         return transactions
 
+    def _parse_woori(self) -> list[dict]:
+        """
+        Woori Bank format:
+          13-Aug-24 PaytoMINHCHENGPHE -3.57USD
+          10-Aug-24 ReceivedFromBakongMember +210.00USD
+        Date at start, description, +/- amount USD
+        """
+        transactions = []
+        DATE_RE = re.compile(r"^(\d{2}-[A-Za-z]{3}-\d{2,4})\s+(.*)")
+        AMT_RE  = re.compile(r"([+-]?[\d,]+\.?\d*)\s*USD")
+
+        for page_text in self.pages:
+            for line in page_text.split("\n"):
+                line = line.strip()
+                m    = DATE_RE.match(line)
+                if not m:
+                    continue
+                trx_date = self._parse_date_wing(m.group(1).replace("-24","-2024").replace("-23","-2023").replace("-25","-2025").replace("-26","-2026"))
+                # Try 2-digit year
+                if not trx_date:
+                    dm2 = re.match(r"(\d{2})-([A-Za-z]{3})-(\d{2})", m.group(1))
+                    if dm2:
+                        mon = self.MONTH_MAP.get(dm2.group(2).lower())
+                        yr  = int(dm2.group(3)) + 2000
+                        if mon:
+                            trx_date = date(yr, mon, int(dm2.group(1)))
+
+                rest = m.group(2)
+                am   = AMT_RE.search(rest)
+                if not am or not trx_date:
+                    continue
+
+                amount_str = am.group(1).replace(",","")
+                amount     = abs(float(amount_str))
+                is_credit  = amount_str.startswith("+") or "received" in rest.lower() or "credit" in rest.lower()
+                is_debit   = amount_str.startswith("-") or "pay" in rest.lower() or "loan" in rest.lower()
+
+                desc = AMT_RE.sub("", rest).strip()[:100]
+
+                if amount > 0:
+                    transactions.append({
+                        "date":      trx_date,
+                        "desc":      desc,
+                        "money_in":  round(amount, 2) if is_credit else 0.0,
+                        "money_out": round(amount, 2) if is_debit  else 0.0,
+                        "balance":   0.0,
+                    })
+        return transactions
+
+    def _parse_philip(self) -> list[dict]:
+        """
+        Philip Bank format:
+          Post Date  Value Date  Description  Debit  Credit  Balance
+          2023-05-15 2023-05-15  Transfer In         500.00  503.04
+        """
+        transactions = []
+        DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\s+(\d{4}-\d{2}-\d{2})\s+(.*)")
+        AMT_RE  = re.compile(r"([\d,]+\.?\d*)")
+
+        for page_text in self.pages:
+            for line in page_text.split("\n"):
+                line = line.strip()
+                m    = DATE_RE.match(line)
+                if not m:
+                    continue
+                try:
+                    from datetime import datetime as dt
+                    trx_date = dt.strptime(m.group(1), "%Y-%m-%d").date()
+                except: continue
+
+                rest    = m.group(3)
+                amounts = [float(x.group(1).replace(",",""))
+                           for x in AMT_RE.finditer(rest)
+                           if float(x.group(1).replace(",","")) > 0]
+
+                if len(amounts) < 2:
+                    continue
+
+                balance = amounts[-1]
+                amount  = amounts[-2]
+
+                rl        = rest.lower()
+                is_debit  = any(x in rl for x in ["withdraw","debit","fee","charge","transfer out","payment"])
+                is_credit = any(x in rl for x in ["credit","deposit","received","transfer in"])
+                if not is_debit and not is_credit:
+                    is_credit = True
+
+                desc = AMT_RE.sub("", rest).strip()[:100]
+
+                if amount > 0:
+                    transactions.append({
+                        "date":      trx_date,
+                        "desc":      desc,
+                        "money_in":  round(amount, 2) if is_credit else 0.0,
+                        "money_out": round(amount, 2) if is_debit  else 0.0,
+                        "balance":   round(balance, 2),
+                    })
+        return transactions
+
     def _parse_aba(self) -> list[dict]:
         """ABA Bank: Aug 01, 2025 DESCRIPTION 10.63 USD USD 222.64 USD"""
         transactions = []
@@ -563,6 +681,31 @@ def extract_statement(pdf_path: str) -> dict:
 #  PART 2 — ANALYTICS ENGINE
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _to_date(v):
+    """Convert string, date, or None to a date object safely."""
+    if v is None:
+        return None
+    if isinstance(v, date):
+        return v
+    if isinstance(v, str):
+        # Try ISO format: 2025-08-01
+        try:
+            from datetime import datetime
+            return datetime.strptime(v[:10], "%Y-%m-%d").date()
+        except: pass
+        # Try DD/MM/YYYY
+        try:
+            from datetime import datetime
+            return datetime.strptime(v, "%d/%m/%Y").date()
+        except: pass
+        # Try DD-Mon-YYYY
+        try:
+            from datetime import datetime
+            return datetime.strptime(v, "%d-%b-%Y").date()
+        except: pass
+    return None
+
+
 def compute_analytics(data: dict) -> dict:
     """Compute all COHO summary statistics from transaction data."""
     txns    = data["transactions"]
@@ -590,8 +733,11 @@ def compute_analytics(data: dict) -> dict:
     lowest_bal     = min(closing_values) if closing_values else 0.0
 
     # ── Period ────────────────────────────────────────────────────────────
-    date_from = header.get("period_from") or txns[0]["date"]
-    date_to   = header.get("period_to")   or txns[-1]["date"]
+    date_from = _to_date(header.get("period_from")) or txns[0]["date"]
+    date_to   = _to_date(header.get("period_to"))   or txns[-1]["date"]
+    # Ensure date objects
+    if isinstance(date_from, str): date_from = txns[0]["date"]
+    if isinstance(date_to,   str): date_to   = txns[-1]["date"]
     months    = max(1, round(((date_to.year - date_from.year)*12 +
                                date_to.month - date_from.month) + 1))
 
