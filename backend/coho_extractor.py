@@ -54,8 +54,9 @@ MEDIUM = Border(
 PROFILE_DIR = Path("/app/bank_profiles")
 
 def _load_profiles_for_text(text_upper: str) -> list:
-    """DISABLED - using built-in parsers only."""
-    return []
+    """Find all matching trained profiles for this PDF (may have USD + KHR)."""
+    if not PROFILE_DIR.exists():
+        return []
     matched = []
     seen    = set()
     for f in sorted(PROFILE_DIR.glob("*.json")):
@@ -158,6 +159,8 @@ class BankStatementParser:
         if "VATTANAC"    in p: return "VATTANAC"
 
         # No SWIFT — detect by unique content
+        if "TRN_CODE" in p: return "KBPRASAC"
+        if "POST DATE" in p and "VALUE DATE" in p and "ACCOUNT STATEMENT" in p: return "PHILIP"
         if "CID" in p and "ACCOUNTNUMBER" in p.replace(" ",""): return "WOORI"
         if "WOORI BANK"  in p: return "WOORI"
         if "BALANCE AT PERIOD S" in p: return "POSTBANK"   # Post Bank split word
@@ -327,6 +330,24 @@ class BankStatementParser:
             m = re.search(r"Total Balance\s+([\d,\.]+)\s+USD", p)
             h["ending_balance"] = float(m.group(1).replace(",","")) if m else 0.0
 
+        elif bank == "KBPRASAC":
+            h["bank"] = "KB Prasac"
+            m = re.search(r"Account Number[^\d]*([\d]+)", p)
+            h["account_no"] = m.group(1).strip() if m else ""
+            m = re.search(r"Account Name[s]*\s+([A-Za-z][A-Za-z\s]+)", p)
+            h["holder_name"] = m.group(1).strip()[:50] if m else ""
+            h["currency"] = "KHR" if "KHR" in p else "USD"
+            m = re.search(r"Statement Period From\s+([\d\-A-Za-z]+)\s+To\s+([\d\-A-Za-z]+)", p)
+            if m:
+                h["period_from"] = self._parse_date_wing(
+                    m.group(1).strip() if len(m.group(1).split("-")[2]) == 4
+                    else m.group(1)[:-2] + "20" + m.group(1)[-2:])
+                h["period_to"]   = self._parse_date_wing(
+                    m.group(2).strip() if len(m.group(2).split("-")[2]) == 4
+                    else m.group(2)[:-2] + "20" + m.group(2)[-2:])
+            m = re.search(r"Current Balance[^\d]*([\d,]+)", p)
+            h["ending_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+
         elif bank == "PHILIP":
             h["bank"] = "Philip Bank"
             m = re.search(r"Account Number\s+(\d+)", p)
@@ -450,6 +471,7 @@ class BankStatementParser:
         elif bank == "ACLEDA":  return self._parse_acleda()
         elif bank == "WOORI":   return self._parse_woori()
         elif bank == "PHILIP":  return self._parse_philip()
+        elif bank == "KBPRASAC": return self._parse_kbprasac()
         elif bank == "HATTHA":  return self._parse_hattha()
         elif bank == "CANADIA": return self._parse_canadia()
         elif bank == "SATHAPANA": return self._parse_sathapana()
@@ -1045,54 +1067,166 @@ class BankStatementParser:
                     })
         return transactions
 
+    def _parse_kbprasac(self) -> list[dict]:
+        """
+        KB Prasac format:
+          01-Sep-25 ADJ 160 Adjustment 0 347 8,364
+          04-Sep-25 QRP 160 Description... 0 470,000 478,350
+        Columns: Date TrnCode Branch Description Debit Credit Balance
+        Date format: DD-Mon-YY
+        Debit=0 means credit transaction, Credit=0 means debit
+        Last number = balance, second-to-last = credit, third-to-last = debit
+        """
+        transactions = []
+        DATE_RE = re.compile(r"^(\d{2}-[A-Za-z]{3}-\d{2,4})\s+(.*)")
+        AMT_RE  = re.compile(r"([\d,]+)")
+        SKIP    = {"date", "balance brought forward", "trn_code", "branch",
+                   "statement period", "account number", "currency", "interest rate"}
+
+        for page_text in self.pages:
+            lines = [l.strip() for l in page_text.split("\n")]
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if any(s in line.lower() for s in SKIP):
+                    i += 1; continue
+
+                m = DATE_RE.match(line)
+                if m:
+                    date_str = m.group(1)
+                    rest     = m.group(2)
+                    i += 1
+
+                    # Fix 2-digit year
+                    parts = date_str.split("-")
+                    if len(parts) == 3 and len(parts[2]) == 2:
+                        date_str = f"{parts[0]}-{parts[1]}-20{parts[2]}"
+                    trx_date = self._parse_date_wing(date_str)
+
+                    # Collect continuation lines (description wraps)
+                    while i < len(lines) and not DATE_RE.match(lines[i]):
+                        nl = lines[i]
+                        if any(s in nl.lower() for s in SKIP): break
+                        rest += " " + nl
+                        i += 1
+
+                    if not trx_date:
+                        continue
+
+                    # Find all numbers at end of line
+                    # Format: desc debit credit balance (last 3 numbers)
+                    all_nums = [float(m2.group(1).replace(",",""))
+                                for m2 in AMT_RE.finditer(rest)]
+
+                    if len(all_nums) < 3:
+                        continue
+
+                    balance = all_nums[-1]
+                    credit  = all_nums[-2]
+                    debit   = all_nums[-3]
+
+                    # Skip "Balance Brought Forward" type entries
+                    rl = rest.lower()
+                    if "brought forward" in rl or "balance b/f" in rl:
+                        continue
+
+                    # Clean description
+                    desc = re.sub(r"[\d,]+", "", rest)
+                    desc = re.sub(r"\b[A-Z]{2,5}\b\s+\d+\s+", "", desc)  # remove TrnCode + Branch
+                    desc = re.sub(r"\s+", " ", desc).strip()[:100]
+
+                    if debit > 0 or credit > 0:
+                        transactions.append({
+                            "date":      trx_date,
+                            "desc":      desc,
+                            "money_in":  round(credit, 2),
+                            "money_out": round(debit,  2),
+                            "balance":   round(balance,2),
+                        })
+                else:
+                    i += 1
+
+        return transactions
+
     def _parse_philip(self) -> list[dict]:
         """
         Philip Bank format:
-          Post Date  Value Date  Description  Debit  Credit  Balance
-          2023-05-15 2023-05-15  Transfer In         500.00  503.04
+          Post Date  Value Date  Description (multi-line)  Debit  Credit  Balance
+          2023-05-03 2023-05-03  Received from...          48.70         50.61
+          2023-05-05 2023-05-05  ATM Cash Withdrawal       200.00        70.61
+        Two date columns at start, then description, debit, credit, balance.
+        Credit column empty for debits, debit column empty for credits.
         """
         transactions = []
         DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\s+(\d{4}-\d{2}-\d{2})\s+(.*)")
-        AMT_RE  = re.compile(r"([\d,]+\.?\d*)")
+        AMT_RE  = re.compile(r"([\d,]+\.\d{2})")  # must have decimals
+        SKIP    = {"post date","value date","account statement","account information",
+                   "account activity","account summary","balance forward",
+                   "period:","generated:","opened date"}
 
         for page_text in self.pages:
-            for line in page_text.split("\n"):
-                line = line.strip()
-                m    = DATE_RE.match(line)
-                if not m:
-                    continue
-                try:
-                    from datetime import datetime as dt
-                    trx_date = dt.strptime(m.group(1), "%Y-%m-%d").date()
-                except: continue
+            lines = [l.strip() for l in page_text.split("\n")]
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if any(s in line.lower() for s in SKIP):
+                    i += 1; continue
 
-                rest    = m.group(3)
-                amounts = [float(x.group(1).replace(",",""))
-                           for x in AMT_RE.finditer(rest)
-                           if float(x.group(1).replace(",","")) > 0]
+                m = DATE_RE.match(line)
+                if m:
+                    try:
+                        from datetime import datetime as dt2
+                        trx_date = dt2.strptime(m.group(1), "%Y-%m-%d").date()
+                    except:
+                        i += 1; continue
 
-                if len(amounts) < 2:
-                    continue
+                    rest = m.group(3)
+                    i += 1
+                    # Collect continuation lines
+                    while i < len(lines) and not DATE_RE.match(lines[i]):
+                        nl = lines[i]
+                        if any(s in nl.lower() for s in SKIP): break
+                        rest += " " + nl
+                        i += 1
 
-                balance = amounts[-1]
-                amount  = amounts[-2]
+                    # Philip: amounts have decimals, last = balance
+                    amounts = [float(x.group(1).replace(",",""))
+                               for x in AMT_RE.finditer(rest)
+                               if float(x.group(1).replace(",","")) > 0]
 
-                rl        = rest.lower()
-                is_debit  = any(x in rl for x in ["withdraw","debit","fee","charge","transfer out","payment"])
-                is_credit = any(x in rl for x in ["credit","deposit","received","transfer in"])
-                if not is_debit and not is_credit:
-                    is_credit = True
+                    if len(amounts) < 2:
+                        continue
 
-                desc = AMT_RE.sub("", rest).strip()[:100]
+                    balance = amounts[-1]
+                    amount  = amounts[-2]
 
-                if amount > 0:
-                    transactions.append({
-                        "date":      trx_date,
-                        "desc":      desc,
-                        "money_in":  round(amount, 2) if is_credit else 0.0,
-                        "money_out": round(amount, 2) if is_debit  else 0.0,
-                        "balance":   round(balance, 2),
-                    })
+                    rl        = rest.lower()
+                    is_debit  = any(x in rl for x in [
+                        "atm","withdrawal","withdraw","fee","charge",
+                        "transfer to","payment","debit"
+                    ])
+                    is_credit = any(x in rl for x in [
+                        "received","credit","deposit","transfer from","bonus"
+                    ])
+                    if not is_debit and not is_credit:
+                        is_credit = True
+
+                    # Remove ref numbers and clean desc
+                    desc = re.sub(r"Ref#\s*\S+", "", rest)
+                    desc = AMT_RE.sub("", desc)
+                    desc = re.sub(r"\s+", " ", desc).strip()[:100]
+
+                    if amount > 0:
+                        transactions.append({
+                            "date":      trx_date,
+                            "desc":      desc,
+                            "money_in":  round(amount, 2) if is_credit else 0.0,
+                            "money_out": round(amount, 2) if is_debit  else 0.0,
+                            "balance":   round(balance, 2),
+                        })
+                else:
+                    i += 1
+
         return transactions
 
     def _parse_aba(self) -> list[dict]:
@@ -1356,8 +1490,7 @@ def fill_coho_template(data: dict, output_path: str,
     acct_no  = header.get("account_no","")
     bank     = header.get("bank","Bank")
     currency = header.get("currency","USD")
-    safe_acct = re.sub(r"[/\\?*\[\]:]", "-", acct_no)
-    ws.title = f"{bank} {currency}-{safe_acct}"[:31]
+    ws.title = f"{bank} {currency}-{acct_no}"[:31]
 
     # ── Column widths ──────────────────────────────────────────────────────
     widths = {1:8,2:12,3:45,4:16,5:16,6:16,7:18,
