@@ -1356,7 +1356,8 @@ def fill_coho_template(data: dict, output_path: str,
     acct_no  = header.get("account_no","")
     bank     = header.get("bank","Bank")
     currency = header.get("currency","USD")
-    ws.title = f"{bank} {currency}-{acct_no}"[:31]
+    safe_acct = re.sub(r"[/\\?*\[\]:]", "-", acct_no)
+    ws.title = f"{bank} {currency}-{safe_acct}"[:31]
 
     # ── Column widths ──────────────────────────────────────────────────────
     widths = {1:8,2:12,3:45,4:16,5:16,6:16,7:18,
