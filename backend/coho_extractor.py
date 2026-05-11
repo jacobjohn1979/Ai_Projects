@@ -54,9 +54,8 @@ MEDIUM = Border(
 PROFILE_DIR = Path("/app/bank_profiles")
 
 def _load_profiles_for_text(text_upper: str) -> list:
-    """Find all matching trained profiles for this PDF (may have USD + KHR)."""
-    if not PROFILE_DIR.exists():
-        return []
+    """DISABLED - using built-in parsers only."""
+    return []
     matched = []
     seen    = set()
     for f in sorted(PROFILE_DIR.glob("*.json")):

@@ -1,5 +1,5 @@
 {
-  "uid": "b166be80",
+  "uid": "564fd99e",
   "bank_name": "ACLEDA Bank",
   "swift": "ACLBKHPP",
   "currency": "KHR",
@@ -11,5 +11,5 @@
   "skip_keywords": "page ,balance at period,this is a computer,swift code,statement period",
   "notes": "",
   "filename": "3. Acleda Statement KHR.pdf",
-  "created_at": "2026-05-08T08:59:25.575Z"
+  "created_at": "2026-05-11T03:01:52.856Z"
 }
