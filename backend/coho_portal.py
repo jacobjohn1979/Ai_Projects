@@ -77,6 +77,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .month-table .total-row td{background:#fffde7;font-weight:700}
 """
 
+def _sym(currency):
+    """Return currency symbol and formatter based on currency code."""
+    if str(currency).upper() == "KHR":
+        return "KHR", lambda v: "{:,.0f}".format(float(v))  # no decimals for KHR
+    return "$", lambda v: "{:,.2f}".format(float(v))
+
+
 def page(title, body):
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
@@ -277,9 +284,9 @@ def _start_extraction(uid):
             data = {"header": header, "transactions": txns,
                     "parsed_at": datetime.now().isoformat(), "source_file": job["pdf_path"]}
             an = compute_analytics(data)
-            append("Total In:  $" + "{:,.2f}".format(an.get("total_in_amt", 0)) +
+            append("Total In:  " + _sym(header.get("currency","USD"))[0] + " " + ("{:,.0f}" if header.get("currency","USD").upper()=="KHR" else "{:,.2f}").format(an.get("total_in_amt", 0)) +
                    " (" + str(an.get("total_in_trx", 0)) + " trx)", "#4ade80", 72, "Generating Excel...")
-            append("Total Out: $" + "{:,.2f}".format(an.get("total_out_amt", 0)) +
+            append("Total Out: " + _sym(header.get("currency","USD"))[0] + " " + ("{:,.0f}" if header.get("currency","USD").upper()=="KHR" else "{:,.2f}").format(an.get("total_out_amt", 0)) +
                    " (" + str(an.get("total_out_trx", 0)) + " trx)", "#f87171")
             xlsx = str(UPLOAD_DIR / (uid + "_COHO_Summary.xlsx"))
             fill_coho_template(data, xlsx)
@@ -342,29 +349,30 @@ def result(uid: str):
     txns   = data.get("transactions", [])
     mrows  = data.get("monthly_rows", [])
 
+    sym, fmt = _sym(header.get("currency","USD"))
     stats = (
         '<div class="stat-grid">'
         '<div class="stat"><div class="stat-num">' + str(data.get("total_transactions", 0)) + '</div>'
         '<div class="stat-lbl">Total Transactions</div></div>'
-        '<div class="stat"><div class="stat-num" style="color:#059669">$' +
-        "{:,.2f}".format(float(an.get("total_in_amt", 0))) + '</div>'
+        '<div class="stat"><div class="stat-num" style="color:#059669">' + sym + ' ' +
+        fmt(an.get("total_in_amt", 0)) + '</div>'
         '<div class="stat-lbl">Total In (' + str(an.get("total_in_trx", 0)) + ' trx)</div></div>'
-        '<div class="stat"><div class="stat-num" style="color:#dc2626">$' +
-        "{:,.2f}".format(float(an.get("total_out_amt", 0))) + '</div>'
+        '<div class="stat"><div class="stat-num" style="color:#dc2626">' + sym + ' ' +
+        fmt(an.get("total_out_amt", 0)) + '</div>'
         '<div class="stat-lbl">Total Out (' + str(an.get("total_out_trx", 0)) + ' trx)</div></div>'
-        '<div class="stat"><div class="stat-num">$' +
-        "{:,.2f}".format(float(an.get("avg_closing_bal", 0))) + '</div>'
+        '<div class="stat"><div class="stat-num">' + sym + ' ' +
+        fmt(an.get("avg_closing_bal", 0)) + '</div>'
         '<div class="stat-lbl">Avg Closing Balance</div></div>'
-        '<div class="stat"><div class="stat-num">$' +
-        "{:,.2f}".format(float(an.get("highest_balance", 0))) + '</div>'
+        '<div class="stat"><div class="stat-num">' + sym + ' ' +
+        fmt(an.get("highest_balance", 0)) + '</div>'
         '<div class="stat-lbl">Highest Balance</div></div>'
-        '<div class="stat"><div class="stat-num">$' +
-        "{:,.2f}".format(float(an.get("lowest_balance", 0))) + '</div>'
+        '<div class="stat"><div class="stat-num">' + sym + ' ' +
+        fmt(an.get("lowest_balance", 0)) + '</div>'
         '<div class="stat-lbl">Lowest Balance</div></div>'
         '<div class="stat"><div class="stat-num">' + str(an.get("period_months", 0)) + '</div>'
         '<div class="stat-lbl">Months</div></div>'
-        '<div class="stat"><div class="stat-num">$' +
-        "{:,.2f}".format(float(an.get("reversal_amt", 0))) + '</div>'
+        '<div class="stat"><div class="stat-num">' + sym + ' ' +
+        fmt(an.get("reversal_amt", 0)) + '</div>'
         '<div class="stat-lbl">Reversals</div></div>'
         '</div>'
     )
@@ -374,18 +382,18 @@ def result(uid: str):
         mhtml += ('<tr><td>' + str(mr.get("no", "")) + '</td><td>' +
                   str(mr.get("month", ""))[:7] + '</td><td style="color:#dc2626">' +
                   str(mr.get("debit_trx", 0)) + '</td><td style="color:#dc2626">' +
-                  "{:,.2f}".format(float(mr.get("debit_amt", 0))) + '</td><td style="color:#059669">' +
+                  fmt(mr.get("debit_amt", 0)) + '</td><td style="color:#059669">' +
                   str(mr.get("credit_trx", 0)) + '</td><td style="color:#059669">' +
-                  "{:,.2f}".format(float(mr.get("credit_amt", 0))) + '</td><td>' +
-                  "{:,.2f}".format(float(mr.get("avg_bal", 0))) + '</td><td>' +
-                  "{:,.2f}".format(float(mr.get("lowest_bal", 0))) + '</td><td>' +
-                  "{:,.2f}".format(float(mr.get("highest_bal", 0))) + '</td></tr>')
+                  fmt(mr.get("credit_amt", 0)) + '</td><td>' +
+                  fmt(mr.get("avg_bal", 0)) + '</td><td>' +
+                  fmt(mr.get("lowest_bal", 0)) + '</td><td>' +
+                  fmt(mr.get("highest_bal", 0)) + '</td></tr>')
     mhtml += ('<tr class="total-row"><td colspan="2">Total</td><td style="color:#dc2626">' +
               str(an.get("total_out_trx", 0)) + '</td><td style="color:#dc2626">' +
-              "{:,.2f}".format(float(an.get("total_out_amt", 0))) +
+              fmt(an.get("total_out_amt", 0)) +
               '</td><td style="color:#059669">' + str(an.get("total_in_trx", 0)) +
               '</td><td style="color:#059669">' +
-              "{:,.2f}".format(float(an.get("total_in_amt", 0))) +
+              fmt(an.get("total_in_amt", 0)) +
               '</td><td colspan="3"></td></tr></tbody></table>')
 
     thtml = ""
@@ -397,10 +405,10 @@ def result(uid: str):
         thtml += ('<tr class="' + cls + '"><td style="color:#94a3b8;text-align:center">' +
                   str(i + 1) + '</td><td style="white-space:nowrap">' + t["date"][:10] +
                   '</td><td>' + t["desc"][:70] + '</td><td style="color:#dc2626;font-family:monospace">' +
-                  ("{:,.2f}".format(out) if out > 0 else "") +
+                  (fmt(out) if out > 0 else "") +
                   '</td><td style="color:#059669;font-family:monospace">' +
-                  ("{:,.2f}".format(inn) if inn > 0 else "") +
-                  '</td><td style="font-family:monospace">' + "{:,.2f}".format(bal) +
+                  (fmt(inn) if inn > 0 else "") +
+                  '</td><td style="font-family:monospace">' + fmt(bal) +
                   '</td><td>' + ("&#127761;" if t.get("is_closing") else "") + '</td></tr>')
 
     period = str(header.get("period_from", ""))[:10] + " to " + str(header.get("period_to", ""))[:10]
