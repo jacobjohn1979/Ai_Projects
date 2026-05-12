@@ -105,48 +105,31 @@ class BankStatementParser:
 
     def _detect_bank(self) -> str:
         p = self.full_text.upper()
-
-        # Check trained profiles first
-        profiles = _load_profiles_for_text(p)
-        if profiles:
-            keys = ",".join(pr.get("profile_key", pr.get("swift","")) for pr in profiles)
-            return "PROFILES:" + keys
-
-        # Built-in detection by SWIFT code (most reliable)
+        # Structural markers FIRST - these banks mention other banks in descriptions
+        if "TRN_CODE" in p:                               return "KBPRASAC"
+        if "POST DATE" in p and "VALUE DATE" in p:        return "PHILIP"
+        if "TXN DATE TIME" in p:                          return "AMRET"
+        if "DEBIT AMOUNT" in p and "CREDIT AMOUNT" in p and "OPENING BALANCE" in p: return "AMRET"
+        # SWIFT codes
         if "ABAAKHPP"    in p: return "ABA"
         if "WIGCKHPPXXX" in p: return "WING"
         if "ACLBKHPP"    in p: return "ACLEDA"
-        if "TXN DATE TIME" in p: return "AMRET"
-        if "DEBIT AMOUNT" in p and "CREDIT AMOUNT" in p: return "AMRET"
         if "ACLEDA"      in p: return "ACLEDA"
         if "CADIKHPP"    in p: return "CANADIA"
         if "HLFBKHPP"    in p: return "HATTHA"
         if "HATTHA"      in p: return "HATTHA"
         if "STPBKHPP"    in p: return "SATHAPANA"
-        if "PERIOD FROM:" in p and "MONEY IN" in p and "MONEY OUT" in p: return "SATHAPANA"
-        if "Sathapana" in self.full_text: return "SATHAPANA"
         if "MBBECAMM"    in p: return "MAYBANK"
         if "PPCBKHPP"    in p: return "PRINCE"
         if "VATTANAC"    in p: return "VATTANAC"
-
-        # No SWIFT — detect by unique content
-        if "TRN_CODE" in p: return "KBPRASAC"
-        if "POST DATE" in p and "VALUE DATE" in p and "ACCOUNT STATEMENT" in p: return "PHILIP"
-        if "CID" in p and "ACCOUNTNUMBER" in p.replace(" ",""): return "WOORI"
-        if "WOORI BANK"  in p: return "WOORI"
-        if "BALANCE AT PERIOD S" in p: return "POSTBANK"   # Post Bank split word
-        if "BOOK DATE" in p and "CLOSING BALANCE" in p: return "POSTBANK"
-        if "A/C:" in p and "WITHDRAWAL" in p and "DEPOSIT" in p: return "MAYBANK"
-        if "ACCOUNT STATEMENT" in p and "PHILLIP" in p: return "PHILIP"
-        if "ACCOUNT STATEMENT" in p and "PHILIP" in p: return "PHILIP"
-        if "CADIKHPP" in p: return "CANADIA"
-
-        # ACLEDA KHR — garbled Khmer text but has ACLEDA footer
-        if "acledabank" in self.full_text.lower(): return "ACLEDA"
-        # Sathapana — unique column headers
+        # No SWIFT - unique content
+        if "CID" in p and "ACCOUNT NUMBER" in p:          return "WOORI"
+        if "WOORI BANK"  in p:                            return "WOORI"
+        if "BOOK DATE"   in p and "CLOSING BALANCE" in p: return "POSTBANK"
+        if "A/C:" in p and "WITHDRAWAL" in p:             return "MAYBANK"
         if "PERIOD FROM:" in p and "MONEY IN" in p and "MONEY OUT" in p: return "SATHAPANA"
-        if "BEGINNING BALANCE:" in p and "ENDING BALANCE:" in p and "REFERENCE NO" in p: return "SATHAPANA"
-
+        if "BEGINNING BALANCE:" in p and "ENDING BALANCE:" in p: return "SATHAPANA"
+        if "acledabank" in self.full_text.lower():        return "ACLEDA"
         return "GENERIC"
 
     def _parse_header(self) -> dict:
@@ -273,6 +256,20 @@ class BankStatementParser:
             h["account_no"] = m.group(1).strip()[:30] if m else ""
             h["currency"] = "USD"
 
+        elif bank == "AMRET":
+            h["bank"] = "AMRET MFI"
+            m = re.search(r"Account Holder Name[^:]*:([^\n]+)", p)
+            h["holder_name"] = m.group(1).strip()[:50] if m else ""
+            m = re.search(r"Account Number[^:]*:(\s*[\d]+)", p)
+            h["account_no"] = m.group(1).strip() if m else ""
+            h["currency"] = "KHR" if "KHR" in p[:500] else "USD"
+            m = re.search(r"From\s+([\d/]+)\s+to\s+([\d/]+)", p)
+            if m:
+                h["period_from"] = self._parse_date_dmy(m.group(1).strip())
+                h["period_to"]   = self._parse_date_dmy(m.group(2).strip())
+            m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
+            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+        
         elif bank == "AMRET":
             h["bank"] = "AMRET MFI"
             m = re.search(r"Account Holder Name[:\s]+([A-Za-z\s\-]+?)(?:
