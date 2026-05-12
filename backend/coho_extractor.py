@@ -54,39 +54,8 @@ MEDIUM = Border(
 PROFILE_DIR = Path("/app/bank_profiles")
 
 def _load_profiles_for_text(text_upper: str) -> list:
-    """Find all matching trained profiles for this PDF (may have USD + KHR)."""
-    if not PROFILE_DIR.exists():
-        return []
-    matched = []
-    seen    = set()
-    for f in sorted(PROFILE_DIR.glob("*.json")):
-        try:
-            p        = json.loads(f.read_text())
-            prof_key = p.get("profile_key", p.get("swift", f.stem))
-            if prof_key in seen:
-                continue
-            swift    = p.get("swift","").upper()
-            keywords = [k.upper() for k in (p.get("keywords") or []) if k]
-            # Add swift and bank name words as implicit keywords
-            if swift and swift not in keywords:
-                keywords.append(swift)
-            for w in p.get("bank_name","").upper().split():
-                if len(w) > 3 and w not in keywords:
-                    keywords.append(w)
-            # Check all keywords
-            for kw in keywords:
-                if kw and kw in text_upper:
-                    matched.append(p)
-                    seen.add(prof_key)
-                    break
-            # Special: Woori has no SWIFT — detect by unique field names
-            if prof_key not in seen and "CID" in text_upper and "ACCOUNTNUMBER" in text_upper.replace(" ",""):
-                if "WOORI" in p.get("bank_name","").upper() or "HVBK" in swift:
-                    matched.append(p)
-                    seen.add(prof_key)
-        except:
-            pass
-    return matched
+    """Profiles disabled — using built-in parsers only."""
+    return []
 
 def _load_profile_for_text(text_upper: str) -> dict | None:
     """Find first matching trained profile (legacy single-profile support)."""
@@ -471,6 +440,7 @@ class BankStatementParser:
         elif bank == "ACLEDA":  return self._parse_acleda()
         elif bank == "WOORI":   return self._parse_woori()
         elif bank == "PHILIP":  return self._parse_philip()
+        elif bank == "AMRET":   return self._parse_amret()
         elif bank == "KBPRASAC": return self._parse_kbprasac()
         elif bank == "HATTHA":  return self._parse_hattha()
         elif bank == "CANADIA": return self._parse_canadia()
@@ -483,28 +453,18 @@ class BankStatementParser:
 
     def _parse_wing(self) -> list[dict]:
         """
-        Wing Bank PDF has two date patterns:
-          Pattern A: date alone on line, amounts on next line
-            14: 'Direct Bank Transfer from'
-            15: '22-Apr-2026'
-            16: '004 EWJ608421 001214686 JOHN JACOB, MR - 640.00 687.37'
-            17: '08:17:18 PM'
-            18: 'Vattanac Bank e053e12e'
-
-          Pattern B: date + description on same line, amounts on next line
-            19: '30-Apr-2026 Saving Interest from'
-            20: '004 004IRFHUSD000002 - 0.02 687.39'
-            21: '09:33:48 PM 100536313'
-
-        Amount line format: branch ref description - credit balance
-        '-' in debit position means no debit (all credits in this sample)
-        Last number = balance, second-to-last = transaction amount
+        Wing Bank - handles both USD (decimal) and KHR (integer) amounts.
+        USD: '004 EWJ608421 001214686 JOHN JACOB - 640.00 687.37'
+        KHR: '000 ESC021550 - 2,000,000 11,688,068'  (negative = debit)
+        Date on own line or date+desc on same line.
+        Last number = balance, second-to-last = transaction amount.
+        Negative amount means debit (money out).
         """
         transactions = []
-        # Match date at start of line, with optional description after
         DATE_RE = re.compile(r"^(\d{2}-[A-Za-z]{3}-\d{4})(.*)")
         TIME_RE = re.compile(r"\d{2}:\d{2}:\d{2}\s*[AP]M")
-        AMT_RE  = re.compile(r"([\d,]+\.\d{2})")
+        # Match both decimal and integer amounts, including negative
+        AMT_RE  = re.compile(r"(-?\d[\d,]*(?:\.\d{1,2})?)")
 
         SKIP = {"Ending Balance","Wing Bank","PAGE","Balance in","ACCOUNT SUMMARY",
                 "ACCOUNT INFORMATION","Opening Balance","Total Credit","Total Debit",
@@ -519,7 +479,6 @@ class BankStatementParser:
             while i < len(lines):
                 line = lines[i]
 
-                # Skip header/footer lines
                 if any(s in line for s in SKIP):
                     prev_desc = ""
                     i += 1
@@ -527,49 +486,53 @@ class BankStatementParser:
 
                 dm = DATE_RE.match(line)
                 if dm:
-                    trx_date   = self._parse_date_wing(dm.group(1))
+                    trx_date    = self._parse_date_wing(dm.group(1))
                     inline_desc = dm.group(2).strip()
                     i += 1
 
-                    # Collect body lines until next date or end markers
                     body_lines = []
                     while i < len(lines):
                         nl = lines[i]
-                        if DATE_RE.match(nl):
-                            break
-                        if any(s in nl for s in SKIP):
-                            break
+                        if DATE_RE.match(nl): break
+                        if any(s in nl for s in SKIP): break
                         body_lines.append(nl)
                         i += 1
 
                     body = " ".join(body_lines)
 
-                    # Find all decimal amounts in body
-                    amounts = [float(m.group(1).replace(",",""))
-                               for m in AMT_RE.finditer(body)
-                               if float(m.group(1).replace(",","")) > 0]
+                    # Find all amounts (positive and negative)
+                    raw_amounts = []
+                    for m in AMT_RE.finditer(body):
+                        try:
+                            v = float(m.group(1).replace(",",""))
+                            raw_amounts.append(v)
+                        except: pass
+
+                    # Filter out small reference numbers (branch codes etc)
+                    amounts = [v for v in raw_amounts if abs(v) >= 0.01]
 
                     if len(amounts) < 2:
-                        # Try prev_desc + inline_desc as clue, skip
                         prev_desc = inline_desc or prev_desc
                         continue
 
-                    balance = amounts[-1]
+                    balance = abs(amounts[-1])
                     amount  = amounts[-2]
+                    is_debit = amount < 0
+                    amount  = abs(amount)
 
-                    # Build description
+                    # Also check keywords
+                    rl = (inline_desc + " " + body).lower()
+                    if not is_debit:
+                        is_debit = any(x in rl for x in
+                            ["fee","charge","payment to","transfer to","withdrawal","bakong transfer to"])
+
                     desc_parts = [x for x in [prev_desc, inline_desc] if x]
-                    desc_raw   = " ".join(desc_parts) + " " + body
-                    desc = TIME_RE.sub('', desc_raw)
-                    desc = re.sub(r'\b\d{3}\b', '', desc)        # branch code
-                    desc = re.sub(r'\b[A-Z0-9]{8,}\b', '', desc) # ref numbers
-                    desc = AMT_RE.sub('', desc)                   # amounts
+                    desc = TIME_RE.sub('', " ".join(desc_parts) + " " + body)
+                    desc = re.sub(r'\b\d{3}\b', '', desc)
+                    desc = re.sub(r'\b[A-Z0-9]{8,}\b', '', desc)
+                    desc = AMT_RE.sub('', desc)
                     desc = re.sub(r'\s+-\s*', ' ', desc)
                     desc = re.sub(r'\s+', ' ', desc).strip(' -,.')[:100]
-
-                    # Direction — Wing uses '-' in debit col for credits
-                    rl = (inline_desc + " " + body).lower()
-                    is_debit = any(x in rl for x in ["fee","charge","payment to","transfer to","withdrawal"])
 
                     if trx_date and amount > 0:
                         transactions.append({
@@ -592,6 +555,18 @@ class BankStatementParser:
     # ── ACLEDA Bank ───────────────────────────────────────────────────────────
 
     def _parse_acleda(self) -> list[dict]:
+        """
+        ACLEDA Bank - two formats:
+        Format A (English): "24 MAR 23 Transfer Credit Ref 24 MAR 23 860,000.00 860,000.00"
+        Format B (KHR new): "01 Oct 2025 07:59 AM|ACLEDA 6,000.00 KHR 6,036.00 KHR"
+        """
+        # Detect Format B - has amount KHR balance KHR pattern
+        if "|ACLEDA" in self.full_text or (
+            "KHR" in self.full_text.upper() and
+            re.search(r"[\d,]+\.?\d*\s+KHR\s+[\d,]+\.?\d*\s+KHR", self.full_text)
+        ):
+            return self._parse_acleda_khr_new()
+
         """
         ACLEDA format (text-based PDF):
           24 MAR 23  Description  Ref  24 MAR 23  [debit]  [credit]  balance
@@ -691,17 +666,16 @@ class BankStatementParser:
                 if m:
                     date_str = m.group(1)
                     rest     = m.group(2)
-                    trx_date = self._parse_date(date_str.replace(" 2024",", 2024")
-                                                          .replace(" 2023",", 2023")
-                                                          .replace(" 2025",", 2025")
-                                                          .replace(" 2026",", 2026"))
-                    if not trx_date:
-                        # Try "29 Feb 2024" format
-                        dm2 = re.match(r"(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})", date_str)
-                        if dm2:
-                            mon = self.MONTH_MAP.get(dm2.group(2).lower())
-                            if mon:
+                    # Parse "29 Feb 2024" format
+                    dm2 = re.match(r"(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", date_str)
+                    if dm2:
+                        mon = self.MONTH_MAP.get(dm2.group(2).lower()[:3])
+                        if mon:
+                            try:
                                 trx_date = date(int(dm2.group(3)), mon, int(dm2.group(1)))
+                            except: trx_date = None
+                    else:
+                        trx_date = None
                     i += 1
                     # Skip ref line (starts with parenthesis)
                     if i < len(lines) and lines[i].startswith("("):
@@ -1243,6 +1217,129 @@ class BankStatementParser:
                 else:
                     i += 1
 
+        return transactions
+
+
+    def _parse_acleda_khr_new(self) -> list[dict]:
+        """
+        ACLEDA KHR new format:
+          01 Oct 2025 07:59 AM|ACLEDA 6,000.00 KHR 6,036.00 KHR
+          01 Oct 2025 08:13 AM|KB PRASAC 4,000.00 KHR 10,036.00 KHR
+        Pattern: Khmer_date English_date time|source amount KHR balance KHR
+        """
+        transactions = []
+        # Match lines with: digits KHR digits KHR pattern
+        AMT_RE  = re.compile(r"([\d,]+\.?\d*)\s+KHR\s+([\d,]+\.?\d*)\s+KHR")
+        DATE_RE = re.compile(r"(\d{2}\s+[A-Za-z]+\s+\d{4})\s+(\d{2}:\d{2})")
+
+        for page_text in self.pages:
+            for line in page_text.split("\n"):
+                line = line.strip()
+                m = AMT_RE.search(line)
+                if not m:
+                    continue
+                amount  = float(m.group(1).replace(",",""))
+                balance = float(m.group(2).replace(",",""))
+
+                # Find date in line
+                dm = DATE_RE.search(line)
+                trx_date = None
+                if dm:
+                    try:
+                        from datetime import datetime as dt2
+                        trx_date = dt2.strptime(dm.group(1), "%d %b %Y").date()
+                    except:
+                        try:
+                            from datetime import datetime as dt2
+                            trx_date = dt2.strptime(dm.group(1), "%d %B %Y").date()
+                        except: pass
+
+                if not trx_date:
+                    continue
+
+                # Direction: check if "Paid From" = credit, else debit
+                rl = line.lower()
+                is_credit = "paid from" in rl or "received" in rl or "transfer in" in rl
+                is_debit  = "transfer out" in rl or "payment" in rl or "withdraw" in rl
+
+                if not is_credit and not is_debit:
+                    is_credit = True  # ACLEDA KHR defaults to credit
+
+                # Clean description
+                desc = AMT_RE.sub("", line)
+                desc = DATE_RE.sub("", desc)
+                desc = re.sub(r"\|[^|]*\|?", " ", desc)
+                desc = re.sub(r"\s+", " ", desc).strip()[:100]
+
+                if amount > 0:
+                    transactions.append({
+                        "date":      trx_date,
+                        "desc":      desc,
+                        "money_in":  round(amount, 2) if is_credit else 0.0,
+                        "money_out": round(amount, 2) if is_debit  else 0.0,
+                        "balance":   round(balance, 2),
+                    })
+        return transactions
+
+    def _parse_amret(self) -> list[dict]:
+        """
+        AMRET format:
+          31/12/2024 20:22:00 -300.00 USD 1,020.51 USD
+          Pay to Khiev Sarorn...
+        Columns: DD/MM/YYYY HH:MM:SS Amount USD Balance USD
+        Negative amount = debit, positive = credit
+        """
+        transactions = []
+        DATE_RE = re.compile(r"^(\d{2}/\d{2}/\d{4})\s+\d{2}:\d{2}:\d{2}\s+(.*)")
+        AMT_RE  = re.compile(r"(-?[\d,]+\.?\d*)\s+USD")
+        SKIP    = {"txn date","opening balance","debit amount","credit amount"}
+
+        for page_text in self.pages:
+            lines = [l.strip() for l in page_text.split("\n")]
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if any(s in line.lower() for s in SKIP):
+                    i += 1; continue
+
+                m = DATE_RE.match(line)
+                if m:
+                    trx_date = self._parse_date_dmy(m.group(1))
+                    rest     = m.group(2)
+                    i += 1
+                    # Collect description lines
+                    while i < len(lines) and not DATE_RE.match(lines[i]):
+                        nl = lines[i]
+                        if any(s in nl.lower() for s in SKIP): break
+                        rest += " " + nl
+                        i += 1
+
+                    if not trx_date: continue
+
+                    amounts = [(float(m2.group(1).replace(",","")))
+                               for m2 in AMT_RE.finditer(rest)]
+                    if len(amounts) < 2: continue
+
+                    balance = abs(amounts[-1])
+                    amount  = amounts[-2]
+                    is_debit = amount < 0
+                    amount   = abs(amount)
+
+                    desc = AMT_RE.sub("", rest)
+                    desc = re.sub(r"Amount:.*", "", desc)
+                    desc = re.sub(r"Fee:.*", "", desc)
+                    desc = re.sub(r"\s+", " ", desc).strip()[:100]
+
+                    if amount > 0:
+                        transactions.append({
+                            "date":      trx_date,
+                            "desc":      desc,
+                            "money_in":  0.0 if is_debit else round(amount, 2),
+                            "money_out": round(amount, 2) if is_debit else 0.0,
+                            "balance":   round(balance, 2),
+                        })
+                else:
+                    i += 1
         return transactions
 
     def _parse_aba(self) -> list[dict]:
