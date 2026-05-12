@@ -1,7 +1,7 @@
 {
-  "uid": "b012cb8f",
-  "bank_name": "ACLEDA Bank",
-  "swift": "ACLBKHPP",
+  "uid": "daa6ec5d",
+  "bank_name": "CANADIA Bank",
+  "swift": "CANADIAKHR",
   "currency": "KHR",
   "date_pattern": "DD MON YY",
   "date_location": "start_of_line",
@@ -10,6 +10,6 @@
   "debit_keywords": "transfer to,payment to,fee,charge,withdrawal,debit,qr payment debit",
   "skip_keywords": "page ,balance at period,this is a computer,swift code,statement period",
   "notes": "",
-  "filename": "MAY MAKARA20230809 143756.pdf",
-  "created_at": "2026-05-11T03:17:41.880Z"
+  "filename": "12. Canadia Bank (KHR).pdf",
+  "created_at": "2026-05-11T06:17:58.624Z"
 }

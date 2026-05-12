@@ -1,8 +1,8 @@
 {
-  "uid": "b012cb8f",
-  "bank_name": "ACLEDA Bank",
-  "swift": "ACLBKHPP",
-  "currency": "KHR",
+  "uid": "2edcb9b7",
+  "bank_name": "Amret Bank",
+  "swift": "AMRETBBUSD",
+  "currency": "USD",
   "date_pattern": "DD MON YY",
   "date_location": "start_of_line",
   "col_order": "date_desc_debit_credit_balance",
@@ -10,6 +10,6 @@
   "debit_keywords": "transfer to,payment to,fee,charge,withdrawal,debit,qr payment debit",
   "skip_keywords": "page ,balance at period,this is a computer,swift code,statement period",
   "notes": "",
-  "filename": "MAY MAKARA20230809 143756.pdf",
-  "created_at": "2026-05-11T03:17:41.880Z"
+  "filename": "14. AMRET (USD).pdf",
+  "created_at": "2026-05-12T08:19:56.759Z"
 }
