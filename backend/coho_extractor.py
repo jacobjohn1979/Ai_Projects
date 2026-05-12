@@ -106,44 +106,31 @@ class BankStatementParser:
     def _detect_bank(self) -> str:
         p = self.full_text.upper()
 
-        # Check trained profiles first
-        profiles = _load_profiles_for_text(p)
-        if profiles:
-            keys = ",".join(pr.get("profile_key", pr.get("swift","")) for pr in profiles)
-            return "PROFILES:" + keys
+        # Structural markers FIRST — banks whose PDFs mention other banks in transactions
+        if "TRN_CODE" in p:                               return "KBPRASAC"
+        if "POST DATE" in p and "VALUE DATE" in p:        return "PHILIP"
 
-        # Built-in detection by SWIFT code (most reliable)
-        if "ABAAKHPP"    in p: return "ABA"
-        if "WIGCKHPPXXX" in p: return "WING"
-        if "ACLBKHPP"    in p: return "ACLEDA"
-        if "ACLEDA"      in p: return "ACLEDA"
-        if "CADIKHPP"    in p: return "CANADIA"
-        if "HLFBKHPP"    in p: return "HATTHA"
-        if "HATTHA"      in p: return "HATTHA"
-        if "STPBKHPP"    in p: return "SATHAPANA"
-        if "PERIOD FROM:" in p and "MONEY IN" in p and "MONEY OUT" in p: return "SATHAPANA"
-        if "Sathapana" in self.full_text: return "SATHAPANA"
-        if "MBBECAMM"    in p: return "MAYBANK"
-        if "PPCBKHPP"    in p: return "PRINCE"
-        if "VATTANAC"    in p: return "VATTANAC"
+        # SWIFT codes — most reliable for banks that print them
+        if "ABAAKHPP"    in p:                            return "ABA"
+        if "WIGCKHPPXXX" in p:                            return "WING"
+        if "ACLBKHPP"    in p:                            return "ACLEDA"
+        if "ACLEDA"      in p:                            return "ACLEDA"
+        if "CADIKHPP"    in p:                            return "CANADIA"
+        if "HLFBKHPP"    in p:                            return "HATTHA"
+        if "HATTHA"      in p:                            return "HATTHA"
+        if "STPBKHPP"    in p:                            return "SATHAPANA"
+        if "MBBECAMM"    in p:                            return "MAYBANK"
+        if "PPCBKHPP"    in p:                            return "PRINCE"
+        if "VATTANAC"    in p:                            return "VATTANAC"
 
-        # No SWIFT — detect by unique content
-        if "TRN_CODE" in p: return "KBPRASAC"
-        if "POST DATE" in p and "VALUE DATE" in p and "ACCOUNT STATEMENT" in p: return "PHILIP"
-        if "CID" in p and "ACCOUNTNUMBER" in p.replace(" ",""): return "WOORI"
-        if "WOORI BANK"  in p: return "WOORI"
-        if "BALANCE AT PERIOD S" in p: return "POSTBANK"   # Post Bank split word
-        if "BOOK DATE" in p and "CLOSING BALANCE" in p: return "POSTBANK"
-        if "A/C:" in p and "WITHDRAWAL" in p and "DEPOSIT" in p: return "MAYBANK"
-        if "ACCOUNT STATEMENT" in p and "PHILLIP" in p: return "PHILIP"
-        if "ACCOUNT STATEMENT" in p and "PHILIP" in p: return "PHILIP"
-        if "CADIKHPP" in p: return "CANADIA"
-
-        # ACLEDA KHR — garbled Khmer text but has ACLEDA footer
-        if "acledabank" in self.full_text.lower(): return "ACLEDA"
-        # Sathapana — unique column headers
-        if "PERIOD FROM:" in p and "MONEY IN" in p and "MONEY OUT" in p: return "SATHAPANA"
-        if "BEGINNING BALANCE:" in p and "ENDING BALANCE:" in p and "REFERENCE NO" in p: return "SATHAPANA"
+        # No SWIFT — unique content
+        if "CID" in p and "ACCOUNT NUMBER" in p:          return "WOORI"
+        if "WOORI BANK"  in p:                            return "WOORI"
+        if "BOOK DATE"   in p and "CLOSING BALANCE" in p: return "POSTBANK"
+        if "A/C:" in p and "WITHDRAWAL" in p:             return "MAYBANK"
+        if "PERIOD FROM:" in p and "MONEY IN" in p:       return "SATHAPANA"
+        if "BEGINNING BALANCE:" in p and "ENDING BALANCE:" in p: return "SATHAPANA"
+        if "acledabank" in self.full_text.lower():        return "ACLEDA"
 
         return "GENERIC"
 
