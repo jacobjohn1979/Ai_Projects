@@ -54,8 +54,39 @@ MEDIUM = Border(
 PROFILE_DIR = Path("/app/bank_profiles")
 
 def _load_profiles_for_text(text_upper: str) -> list:
-    return []
-
+    """Find all matching trained profiles for this PDF (may have USD + KHR)."""
+    if not PROFILE_DIR.exists():
+        return []
+    matched = []
+    seen    = set()
+    for f in sorted(PROFILE_DIR.glob("*.json")):
+        try:
+            p        = json.loads(f.read_text())
+            prof_key = p.get("profile_key", p.get("swift", f.stem))
+            if prof_key in seen:
+                continue
+            swift    = p.get("swift","").upper()
+            keywords = [k.upper() for k in (p.get("keywords") or []) if k]
+            # Add swift and bank name words as implicit keywords
+            if swift and swift not in keywords:
+                keywords.append(swift)
+            for w in p.get("bank_name","").upper().split():
+                if len(w) > 3 and w not in keywords:
+                    keywords.append(w)
+            # Check all keywords
+            for kw in keywords:
+                if kw and kw in text_upper:
+                    matched.append(p)
+                    seen.add(prof_key)
+                    break
+            # Special: Woori has no SWIFT — detect by unique field names
+            if prof_key not in seen and "CID" in text_upper and "ACCOUNTNUMBER" in text_upper.replace(" ",""):
+                if "WOORI" in p.get("bank_name","").upper() or "HVBK" in swift:
+                    matched.append(p)
+                    seen.add(prof_key)
+        except:
+            pass
+    return matched
 
 def _load_profile_for_text(text_upper: str) -> dict | None:
     """Find first matching trained profile (legacy single-profile support)."""
@@ -106,31 +137,44 @@ class BankStatementParser:
     def _detect_bank(self) -> str:
         p = self.full_text.upper()
 
-        # Structural markers FIRST — banks whose PDFs mention other banks in transactions
-        if "TRN_CODE" in p:                               return "KBPRASAC"
-        if "POST DATE" in p and "VALUE DATE" in p:        return "PHILIP"
+        # Check trained profiles first
+        profiles = _load_profiles_for_text(p)
+        if profiles:
+            keys = ",".join(pr.get("profile_key", pr.get("swift","")) for pr in profiles)
+            return "PROFILES:" + keys
 
-        # SWIFT codes — most reliable for banks that print them
-        if "ABAAKHPP"    in p:                            return "ABA"
-        if "WIGCKHPPXXX" in p:                            return "WING"
-        if "ACLBKHPP"    in p:                            return "ACLEDA"
-        if "ACLEDA"      in p:                            return "ACLEDA"
-        if "CADIKHPP"    in p:                            return "CANADIA"
-        if "HLFBKHPP"    in p:                            return "HATTHA"
-        if "HATTHA"      in p:                            return "HATTHA"
-        if "STPBKHPP"    in p:                            return "SATHAPANA"
-        if "MBBECAMM"    in p:                            return "MAYBANK"
-        if "PPCBKHPP"    in p:                            return "PRINCE"
-        if "VATTANAC"    in p:                            return "VATTANAC"
+        # Built-in detection by SWIFT code (most reliable)
+        if "ABAAKHPP"    in p: return "ABA"
+        if "WIGCKHPPXXX" in p: return "WING"
+        if "ACLBKHPP"    in p: return "ACLEDA"
+        if "ACLEDA"      in p: return "ACLEDA"
+        if "CADIKHPP"    in p: return "CANADIA"
+        if "HLFBKHPP"    in p: return "HATTHA"
+        if "HATTHA"      in p: return "HATTHA"
+        if "STPBKHPP"    in p: return "SATHAPANA"
+        if "PERIOD FROM:" in p and "MONEY IN" in p and "MONEY OUT" in p: return "SATHAPANA"
+        if "Sathapana" in self.full_text: return "SATHAPANA"
+        if "MBBECAMM"    in p: return "MAYBANK"
+        if "PPCBKHPP"    in p: return "PRINCE"
+        if "VATTANAC"    in p: return "VATTANAC"
 
-        # No SWIFT — unique content
-        if "CID" in p and "ACCOUNT NUMBER" in p:          return "WOORI"
-        if "WOORI BANK"  in p:                            return "WOORI"
-        if "BOOK DATE"   in p and "CLOSING BALANCE" in p: return "POSTBANK"
-        if "A/C:" in p and "WITHDRAWAL" in p:             return "MAYBANK"
-        if "PERIOD FROM:" in p and "MONEY IN" in p:       return "SATHAPANA"
-        if "BEGINNING BALANCE:" in p and "ENDING BALANCE:" in p: return "SATHAPANA"
-        if "acledabank" in self.full_text.lower():        return "ACLEDA"
+        # No SWIFT — detect by unique content
+        if "TRN_CODE" in p: return "KBPRASAC"
+        if "POST DATE" in p and "VALUE DATE" in p and "ACCOUNT STATEMENT" in p: return "PHILIP"
+        if "CID" in p and "ACCOUNTNUMBER" in p.replace(" ",""): return "WOORI"
+        if "WOORI BANK"  in p: return "WOORI"
+        if "BALANCE AT PERIOD S" in p: return "POSTBANK"   # Post Bank split word
+        if "BOOK DATE" in p and "CLOSING BALANCE" in p: return "POSTBANK"
+        if "A/C:" in p and "WITHDRAWAL" in p and "DEPOSIT" in p: return "MAYBANK"
+        if "ACCOUNT STATEMENT" in p and "PHILLIP" in p: return "PHILIP"
+        if "ACCOUNT STATEMENT" in p and "PHILIP" in p: return "PHILIP"
+        if "CADIKHPP" in p: return "CANADIA"
+
+        # ACLEDA KHR — garbled Khmer text but has ACLEDA footer
+        if "acledabank" in self.full_text.lower(): return "ACLEDA"
+        # Sathapana — unique column headers
+        if "PERIOD FROM:" in p and "MONEY IN" in p and "MONEY OUT" in p: return "SATHAPANA"
+        if "BEGINNING BALANCE:" in p and "ENDING BALANCE:" in p and "REFERENCE NO" in p: return "SATHAPANA"
 
         return "GENERIC"
 
@@ -1026,24 +1070,29 @@ class BankStatementParser:
     def _parse_kbprasac(self) -> list[dict]:
         """
         KB Prasac format:
-          01-Sep-25 ADJ 160 Adjustment 0 347 8,364
-          04-Sep-25 QRP 160 Description... 0 470,000 478,350
+          01-Sep-25 CRI 160 Credit Interest 0.00 9.19 2,415.19
+          04-Sep-25 FTR 160 Transfer to... 100.00 0.00 2,314.82
+          [description wraps] 
+          04-Sep-25 QRP 160 0 470,000 478,350  <- amounts only after desc wrap
+
         Columns: Date TrnCode Branch Description Debit Credit Balance
-        Date format: DD-Mon-YY
-        Debit=0 means credit transaction, Credit=0 means debit
-        Last number = balance, second-to-last = credit, third-to-last = debit
+        Key insight: amounts are ALWAYS the last 3 numbers on the SAME line as date
+        (continued description lines have no amounts or have them inline)
         """
         transactions = []
         DATE_RE = re.compile(r"^(\d{2}-[A-Za-z]{3}-\d{2,4})\s+(.*)")
-        AMT_RE  = re.compile(r"([\d,]+)")
-        SKIP    = {"date", "balance brought forward", "trn_code", "branch",
-                   "statement period", "account number", "currency", "interest rate"}
+        # Only match proper decimal numbers or plain integers
+        AMT_RE  = re.compile(r"\b(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)\b")
+        SKIP    = {"date trn_code", "balance brought forward", "statement period",
+                   "account number", "currency", "interest rate", "account opening"}
 
         for page_text in self.pages:
             lines = [l.strip() for l in page_text.split("\n")]
             i = 0
             while i < len(lines):
                 line = lines[i]
+
+                # Skip header/footer lines
                 if any(s in line.lower() for s in SKIP):
                     i += 1; continue
 
@@ -1051,15 +1100,15 @@ class BankStatementParser:
                 if m:
                     date_str = m.group(1)
                     rest     = m.group(2)
-                    i += 1
 
-                    # Fix 2-digit year
+                    # Fix 2-digit year: 25 -> 2025
                     parts = date_str.split("-")
-                    if len(parts) == 3 and len(parts[2]) == 2:
+                    if len(parts[2]) == 2:
                         date_str = f"{parts[0]}-{parts[1]}-20{parts[2]}"
                     trx_date = self._parse_date_wing(date_str)
+                    i += 1
 
-                    # Collect continuation lines (description wraps)
+                    # Collect continuation lines until next date
                     while i < len(lines) and not DATE_RE.match(lines[i]):
                         nl = lines[i]
                         if any(s in nl.lower() for s in SKIP): break
@@ -1069,26 +1118,37 @@ class BankStatementParser:
                     if not trx_date:
                         continue
 
-                    # Find all numbers at end of line
-                    # Format: desc debit credit balance (last 3 numbers)
-                    all_nums = [float(m2.group(1).replace(",",""))
-                                for m2 in AMT_RE.finditer(rest)]
-
-                    if len(all_nums) < 3:
-                        continue
-
-                    balance = all_nums[-1]
-                    credit  = all_nums[-2]
-                    debit   = all_nums[-3]
-
-                    # Skip "Balance Brought Forward" type entries
+                    # Skip opening balance lines
                     rl = rest.lower()
                     if "brought forward" in rl or "balance b/f" in rl:
                         continue
 
-                    # Clean description
-                    desc = re.sub(r"[\d,]+", "", rest)
-                    desc = re.sub(r"\b[A-Z]{2,5}\b\s+\d+\s+", "", desc)  # remove TrnCode + Branch
+                    # Extract all valid numbers - filter out garbage from cid:xx
+                    # Clean khmer cid codes first
+                    clean = re.sub(r"\(cid:\d+\)", "", rest)
+                    clean = re.sub(r"[|\\]", " ", clean)
+
+                    nums = []
+                    for m2 in AMT_RE.finditer(clean):
+                        s = m2.group(1).replace(",","")
+                        try:
+                            v = float(s)
+                            nums.append(v)
+                        except: pass
+
+                    if len(nums) < 3:
+                        continue
+
+                    # Last 3 numbers = debit, credit, balance
+                    balance = nums[-1]
+                    credit  = nums[-2]
+                    debit   = nums[-3]
+
+                    # Build clean description
+                    desc = re.sub(r"\(cid:\d+\)", "", rest)
+                    desc = re.sub(r"[|\\].*", "", desc)
+                    desc = re.sub(r"\b\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?\b", "", desc)
+                    desc = re.sub(r"\b[A-Z]{2,4}\b\s+\d+\s*", "", desc)
                     desc = re.sub(r"\s+", " ", desc).strip()[:100]
 
                     if debit > 0 or credit > 0:
@@ -1097,7 +1157,7 @@ class BankStatementParser:
                             "desc":      desc,
                             "money_in":  round(credit, 2),
                             "money_out": round(debit,  2),
-                            "balance":   round(balance,2),
+                            "balance":   round(balance, 2),
                         })
                 else:
                     i += 1
