@@ -453,6 +453,83 @@ def download(uid: str):
         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
 
+
+@app.get("/debug", response_class=HTMLResponse)
+def debug_jobs():
+    """Show all jobs with their status - for debugging failed extractions."""
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    jobs = sorted(UPLOAD_DIR.glob("*_job.json"),
+                  key=lambda f: f.stat().st_mtime, reverse=True)
+
+    rows = ""
+    for jf in jobs[:50]:
+        uid = jf.stem.replace("_job","")
+        try:
+            job  = json.loads(jf.read_text())
+            done = (UPLOAD_DIR / (uid+"_result.json")).exists()
+            err  = (UPLOAD_DIR / (uid+"_error.txt"))
+            log  = (UPLOAD_DIR / (uid+"_log.json"))
+
+            error_text = err.read_text()[:300] if err.exists() else ""
+            log_msgs   = ""
+            if log.exists():
+                try:
+                    logs = json.loads(log.read_text())
+                    log_msgs = " | ".join(l["msg"] for l in logs[-3:] if l.get("msg"))[:200]
+                except: pass
+
+            status = "done" if done else ("error" if err.exists() else "processing")
+            color  = "#059669" if done else ("#dc2626" if err.exists() else "#d97706")
+
+            rows += f"""<tr>
+              <td style="white-space:nowrap;font-size:11px">{uid}</td>
+              <td style="font-size:12px">{job.get("filename","?")}</td>
+              <td style="font-size:11px">{job.get("size_mb",0)} MB</td>
+              <td><span style="color:{color};font-weight:600">{status}</span></td>
+              <td style="font-size:11px;color:#64748b">{error_text or log_msgs}</td>
+              <td>
+                {"<a href='/coho/result/"+uid+"' style='font-size:11px'>View</a>" if done else ""}
+                {"<a href='/coho/retry/"+uid+"' style='font-size:11px;color:#dc2626'>Retry</a>" if err.exists() else ""}
+              </td>
+            </tr>"""
+        except Exception as e:
+            rows += f"<tr><td colspan='6' style='color:red'>{uid}: {e}</td></tr>"
+
+    body = f"""
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1 style="font-size:20px;font-weight:700">Job Debug Panel</h1>
+      <a href="/coho/" class="btn btn-ghost">Back</a>
+    </div>
+    <div class="card">
+      <div class="card-title">Recent Jobs ({len(jobs)} total)</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:#D6E4F0">
+            <th style="padding:8px;text-align:left">UID</th>
+            <th style="padding:8px;text-align:left">File</th>
+            <th style="padding:8px">Size</th>
+            <th style="padding:8px">Status</th>
+            <th style="padding:8px;text-align:left">Details</th>
+            <th style="padding:8px">Action</th>
+          </tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+      </div>
+    </div>"""
+    return HTMLResponse(page("Debug", body))
+
+
+@app.get("/retry/{uid}", response_class=HTMLResponse)
+def retry_job(uid: str):
+    """Clear error and retry extraction."""
+    err_file = UPLOAD_DIR / (uid + "_error.txt")
+    log_file = UPLOAD_DIR / (uid + "_log.json")
+    if err_file.exists(): err_file.unlink()
+    if log_file.exists(): log_file.unlink()
+    _start_extraction(uid)
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"/coho/progress/{uid}", status_code=303)
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
