@@ -273,6 +273,36 @@ class BankStatementParser:
             h["account_no"] = m.group(1).strip()[:30] if m else ""
             h["currency"] = "USD"
 
+        elif bank == "AMRET":
+            h["bank"] = "AMRET MFI"
+            m = re.search(r"Account Holder Name[:\s]+([A-Za-z\s\-]+?)(?:
+|Account Type)", p, re.DOTALL)
+            h["holder_name"] = m.group(1).strip()[:50] if m else ""
+            m = re.search(r"Account Number[:\s]+([\d]+)", p)
+            h["account_no"] = m.group(1).strip() if m else ""
+            h["currency"] = "KHR" if "KHR" in p[:500] else "USD"
+            m = re.search(r"From\s+([\d/]+)\s+to\s+([\d/]+)", p)
+            if m:
+                h["period_from"] = self._parse_date_dmy(m.group(1).strip())
+                h["period_to"]   = self._parse_date_dmy(m.group(2).strip())
+            m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
+            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+
+        elif bank == "AMRET":
+            h["bank"] = "AMRET MFI"
+            m = re.search(r"Account Holder Name[:\s]+([A-Za-z\s\-]+?)(?:
+|Account Type)", p, re.DOTALL)
+            h["holder_name"] = m.group(1).strip()[:50] if m else ""
+            m = re.search(r"Account Number[:\s]+([\d]+)", p)
+            h["account_no"] = m.group(1).strip() if m else ""
+            h["currency"] = "KHR" if "KHR" in p[:500] else "USD"
+            m = re.search(r"From\s+([\d/]+)\s+to\s+([\d/]+)", p)
+            if m:
+                h["period_from"] = self._parse_date_dmy(m.group(1).strip())
+                h["period_to"]   = self._parse_date_dmy(m.group(2).strip())
+            m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
+            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+
         elif bank == "WOORI":
             h["bank"] = "Woori Bank"
             m = re.search(r"Account Number\s+(\d+)", p)
@@ -321,6 +351,7 @@ class BankStatementParser:
 
         elif bank == "PHILIP":
             h["bank"] = "Philip Bank"
+            h["currency"] = "USD"  # Philip is always USD
             m = re.search(r"Account Number\s+(\d+)", p)
             h["account_no"]  = m.group(1).strip() if m else ""
             m = re.search(r"Period:\s*([\d\-]+)\s*to\s*([\d\-]+)", p)
