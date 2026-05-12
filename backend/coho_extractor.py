@@ -54,8 +54,8 @@ MEDIUM = Border(
 PROFILE_DIR = Path("/app/bank_profiles")
 
 def _load_profiles_for_text(text_upper: str) -> list:
-    """Profiles disabled — using built-in parsers only."""
     return []
+
 
 def _load_profile_for_text(text_upper: str) -> dict | None:
     """Find first matching trained profile (legacy single-profile support)."""
@@ -1603,7 +1603,9 @@ def fill_coho_template(data: dict, output_path: str,
     acct_no  = header.get("account_no","")
     bank     = header.get("bank","Bank")
     currency = header.get("currency","USD")
-    ws.title = f"{bank} {currency}-{acct_no}"[:31]
+    safe_acct = re.sub(r'[/\\?*\[\]:]', '-', str(acct_no))
+    safe_bank = re.sub(r'[/\\?*\[\]:]', '-', str(bank))
+    ws.title = f"{safe_bank} {currency}-{safe_acct}"[:31]
 
     # ── Column widths ──────────────────────────────────────────────────────
     widths = {1:8,2:12,3:45,4:16,5:16,6:16,7:18,
