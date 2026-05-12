@@ -54,8 +54,8 @@ MEDIUM = Border(
 PROFILE_DIR = Path("/app/bank_profiles")
 
 def _load_profiles_for_text(text_upper: str) -> list:
+    """Profiles disabled — using built-in parsers only."""
     return []
-
 
 def _load_profile_for_text(text_upper: str) -> dict | None:
     """Find first matching trained profile (legacy single-profile support)."""
@@ -105,31 +105,38 @@ class BankStatementParser:
 
     def _detect_bank(self) -> str:
         p = self.full_text.upper()
-        # Structural markers FIRST - these banks mention other banks in descriptions
-        if "TRN_CODE" in p:                               return "KBPRASAC"
-        if "POST DATE" in p and "VALUE DATE" in p:        return "PHILIP"
-        if "TXN DATE TIME" in p:                          return "AMRET"
+
+        # MUST BE FIRST: banks whose PDFs contain other bank names in transactions
+        if "TRN_CODE"    in p:                                         return "KBPRASAC"
+        if "POST DATE"   in p and "VALUE DATE" in p:                   return "PHILIP"
+        if "TXN DATE TIME" in p:                                       return "AMRET"
         if "DEBIT AMOUNT" in p and "CREDIT AMOUNT" in p and "OPENING BALANCE" in p: return "AMRET"
-        # SWIFT codes
-        if "ABAAKHPP"    in p: return "ABA"
-        if "WIGCKHPPXXX" in p: return "WING"
-        if "ACLBKHPP"    in p: return "ACLEDA"
-        if "ACLEDA"      in p: return "ACLEDA"
-        if "CADIKHPP"    in p: return "CANADIA"
-        if "HLFBKHPP"    in p: return "HATTHA"
-        if "HATTHA"      in p: return "HATTHA"
-        if "STPBKHPP"    in p: return "SATHAPANA"
-        if "MBBECAMM"    in p: return "MAYBANK"
-        if "PPCBKHPP"    in p: return "PRINCE"
-        if "VATTANAC"    in p: return "VATTANAC"
-        # No SWIFT - unique content
-        if "CID" in p and "ACCOUNT NUMBER" in p:          return "WOORI"
-        if "WOORI BANK"  in p:                            return "WOORI"
-        if "BOOK DATE"   in p and "CLOSING BALANCE" in p: return "POSTBANK"
-        if "A/C:" in p and "WITHDRAWAL" in p:             return "MAYBANK"
+
+        # SWIFT codes — reliable unique identifiers
+        if "ABAAKHPP"    in p:                                         return "ABA"
+        if "WIGCKHPPXXX" in p:                                         return "WING"
+        if "ACLBKHPP"    in p:                                         return "ACLEDA"
+        if "CADIKHPP"    in p:                                         return "CANADIA"
+        if "HLFBKHPP"    in p:                                         return "HATTHA"
+        if "STPBKHPP"    in p:                                         return "SATHAPANA"
+        if "MBBECAMM"    in p:                                         return "MAYBANK"
+        if "PPCBKHPP"    in p:                                         return "PRINCE"
+        if "VATTANAC"    in p:                                         return "VATTANAC"
+
+        # Name-based (after SWIFT to avoid false matches)
+        if "HATTHA"      in p:                                         return "HATTHA"
+        if "ACLEDA"      in p:                                         return "ACLEDA"
+        if "acledabank"  in self.full_text.lower():                    return "ACLEDA"
+
+        # Unique structure markers
+        if "CID" in p and "ACCOUNT NUMBER" in p:                      return "WOORI"
+        if "WOORI BANK"  in p:                                         return "WOORI"
+        if "BOOK DATE"   in p and "CLOSING BALANCE" in p:             return "POSTBANK"
+        if "BALANCE AT PERIOD S" in p:                                 return "POSTBANK"
+        if "A/C:" in p and "WITHDRAWAL" in p and "DEPOSIT" in p:      return "MAYBANK"
         if "PERIOD FROM:" in p and "MONEY IN" in p and "MONEY OUT" in p: return "SATHAPANA"
-        if "BEGINNING BALANCE:" in p and "ENDING BALANCE:" in p: return "SATHAPANA"
-        if "acledabank" in self.full_text.lower():        return "ACLEDA"
+        if "BEGINNING BALANCE:" in p and "ENDING BALANCE:" in p:      return "SATHAPANA"
+
         return "GENERIC"
 
     def _parse_header(self) -> dict:
@@ -257,46 +264,18 @@ class BankStatementParser:
             h["currency"] = "USD"
 
         elif bank == "AMRET":
-            h["bank"] = "AMRET MFI"
-            m = re.search(r"Account Holder Name[^:]*:([^\n]+)", p)
-            h["holder_name"] = m.group(1).strip()[:50] if m else ""
-            m = re.search(r"Account Number[^:]*:(\s*[\d]+)", p)
-            h["account_no"] = m.group(1).strip() if m else ""
+            h["bank"]     = "AMRET MFI"
             h["currency"] = "KHR" if "KHR" in p[:500] else "USD"
-            m = re.search(r"From\s+([\d/]+)\s+to\s+([\d/]+)", p)
-            if m:
-                h["period_from"] = self._parse_date_dmy(m.group(1).strip())
-                h["period_to"]   = self._parse_date_dmy(m.group(2).strip())
-            m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
-            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
-        
-        elif bank == "AMRET":
-            h["bank"] = "AMRET MFI"
-            m = re.search(r"Account Holder Name[:\s]+([A-Za-z\s\-]+?)(?:
-|Account Type)", p, re.DOTALL)
+            m = re.search(r"Account Holder Name:[^\n]*\n\s*([A-Za-z][A-Za-z\s\-\.]+)", p)
+            if not m:
+                m = re.search(r"Account Holder Name:\s*([A-Za-z][A-Za-z\s\-\.]+)", p)
             h["holder_name"] = m.group(1).strip()[:50] if m else ""
-            m = re.search(r"Account Number[:\s]+([\d]+)", p)
+            m = re.search(r"Account Number:\s*(\d+)", p)
             h["account_no"] = m.group(1).strip() if m else ""
-            h["currency"] = "KHR" if "KHR" in p[:500] else "USD"
-            m = re.search(r"From\s+([\d/]+)\s+to\s+([\d/]+)", p)
+            m = re.search(r"From\s+(\d{2}/\d{2}/\d{4})\s+to\s+(\d{2}/\d{2}/\d{4})", p)
             if m:
-                h["period_from"] = self._parse_date_dmy(m.group(1).strip())
-                h["period_to"]   = self._parse_date_dmy(m.group(2).strip())
-            m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
-            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
-
-        elif bank == "AMRET":
-            h["bank"] = "AMRET MFI"
-            m = re.search(r"Account Holder Name[:\s]+([A-Za-z\s\-]+?)(?:
-|Account Type)", p, re.DOTALL)
-            h["holder_name"] = m.group(1).strip()[:50] if m else ""
-            m = re.search(r"Account Number[:\s]+([\d]+)", p)
-            h["account_no"] = m.group(1).strip() if m else ""
-            h["currency"] = "KHR" if "KHR" in p[:500] else "USD"
-            m = re.search(r"From\s+([\d/]+)\s+to\s+([\d/]+)", p)
-            if m:
-                h["period_from"] = self._parse_date_dmy(m.group(1).strip())
-                h["period_to"]   = self._parse_date_dmy(m.group(2).strip())
+                h["period_from"] = self._parse_date_dmy(m.group(1))
+                h["period_to"]   = self._parse_date_dmy(m.group(2))
             m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
             h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
 
@@ -348,7 +327,6 @@ class BankStatementParser:
 
         elif bank == "PHILIP":
             h["bank"] = "Philip Bank"
-            h["currency"] = "USD"  # Philip is always USD
             m = re.search(r"Account Number\s+(\d+)", p)
             h["account_no"]  = m.group(1).strip() if m else ""
             m = re.search(r"Period:\s*([\d\-]+)\s*to\s*([\d\-]+)", p)
@@ -1633,8 +1611,9 @@ def fill_coho_template(data: dict, output_path: str,
     acct_no  = header.get("account_no","")
     bank     = header.get("bank","Bank")
     currency = header.get("currency","USD")
-    safe_acct = re.sub(r'[/\\?*\[\]:]', '-', str(acct_no))
-    safe_bank = re.sub(r'[/\\?*\[\]:]', '-', str(bank))
+    import re as _re
+    safe_acct = _re.sub(r'[/\\?*\[\]:]', '-', str(acct_no))
+    safe_bank = _re.sub(r'[/\\?*\[\]:]', '-', str(bank))
     ws.title = f"{safe_bank} {currency}-{safe_acct}"[:31]
 
     # ── Column widths ──────────────────────────────────────────────────────
