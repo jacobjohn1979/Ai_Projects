@@ -121,6 +121,7 @@ class BankStatementParser:
         if "STPBKHPP"    in p:                                         return "SATHAPANA"
         if "MBBECAMM"    in p:                                         return "MAYBANK"
         if "PPCBKHPP"    in p:                                         return "PRINCE"
+        if "FOR POSTING PERIOD" in p:                                  return "AMK"
         if "VATTANAC"    in p:                                         return "VATTANAC"
 
         # Name-based (after SWIFT to avoid false matches)
@@ -278,6 +279,26 @@ class BankStatementParser:
                 h["period_to"]   = self._parse_date_dmy(m.group(2))
             m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
             h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+
+        elif bank == "AMK":
+            h["bank"] = "AMK Microfinance"
+            h["currency"] = "USD"
+            m = re.search(r"Account Name:\s*([^\n]+)", p)
+            h["holder_name"] = m.group(1).strip()[:50] if m else ""
+            m = re.search(r"Account Number:\s*([\d\s]+)", p)
+            h["account_no"] = m.group(1).strip().replace(" ","") if m else ""
+            m = re.search(r"For Posting Period\s*:\s*([\d\-A-Za-z]+)\s+TO\s+([\d\-A-Za-z]+)", p, re.IGNORECASE)
+            if m:
+                h["period_from"] = self._parse_date_wing(m.group(1).strip())
+                h["period_to"]   = self._parse_date_wing(m.group(2).strip())
+            m = re.search(r"Opening Balance:\s*([\d,\.]+)", p)
+            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"Total Credit:\s*([\d,\.]+)", p)
+            h["total_in"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"Total Debit:\s*([\d,\.]+)", p)
+            h["total_out"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"Closing Balance:\s*([\d,\.]+)", p)
+            h["ending_balance"] = float(m.group(1).replace(",","")) if m else 0.0
 
         elif bank == "WOORI":
             h["bank"] = "Woori Bank"
@@ -449,6 +470,7 @@ class BankStatementParser:
         elif bank == "WOORI":   return self._parse_woori()
         elif bank == "PHILIP":  return self._parse_philip()
         elif bank == "AMRET":   return self._parse_amret()
+        elif bank == "AMK":     return self._parse_amk()
         elif bank == "KBPRASAC": return self._parse_kbprasac()
         elif bank == "HATTHA":  return self._parse_hattha()
         elif bank == "CANADIA": return self._parse_canadia()
@@ -1344,6 +1366,93 @@ class BankStatementParser:
                             "desc":      desc,
                             "money_in":  0.0 if is_debit else round(amount, 2),
                             "money_out": round(amount, 2) if is_debit else 0.0,
+                            "balance":   round(balance, 2),
+                        })
+                else:
+                    i += 1
+        return transactions
+
+
+    def _parse_amk(self) -> list[dict]:
+        """
+        AMK Microfinance format:
+          04-Feb-2026 05-Feb-2026 FT260360JPBFLV70\\BNK Purchase At TRY SOMBUN 202.00 32,189.38
+          [continuation lines with time and ref]
+        Columns: Txn Date | Posting Date | Reference | Description | Credit | Debit | Balance
+        Date format: DD-Mon-YYYY
+        Credit column before Debit column.
+        Last number = balance, before-last = debit or credit amount.
+        """
+        transactions = []
+        DATE_RE = re.compile(r"^(\d{2}-[A-Za-z]{3}-\d{4})\s+(\d{2}-[A-Za-z]{3}-\d{4})\s+(.*)")
+        AMT_RE  = re.compile(r"([\d,]+\.\d{2})")
+        SKIP    = {"transaction date","posting date","account name","account type",
+                   "account number","currency","opening balance","total credit",
+                   "total debit","closing balance","for posting period","account statement",
+                   "account details","account summary"}
+
+        for page_text in self.pages:
+            lines = [l.strip() for l in page_text.split("\n")]
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if any(s in line.lower() for s in SKIP):
+                    i += 1; continue
+
+                m = DATE_RE.match(line)
+                if m:
+                    trx_date = self._parse_date_wing(m.group(1))
+                    rest     = m.group(3)
+                    i += 1
+                    # Collect continuation lines
+                    while i < len(lines) and not DATE_RE.match(lines[i]):
+                        nl = lines[i]
+                        if any(s in nl.lower() for s in SKIP): break
+                        rest += " " + nl
+                        i += 1
+
+                    if not trx_date: continue
+
+                    # Find all decimal amounts
+                    amounts = [float(m2.group(1).replace(",",""))
+                               for m2 in AMT_RE.finditer(rest)
+                               if float(m2.group(1).replace(",","")) > 0]
+
+                    if len(amounts) < 2: continue
+
+                    balance = amounts[-1]
+                    amount  = amounts[-2]
+
+                    # Direction: Credit comes before Debit in columns
+                    # Description contains "Purchase At", "Transfer to" = debit
+                    # "Transfer from", "Deposit" = credit
+                    rl = rest.lower()
+                    is_debit = any(x in rl for x in [
+                        "purchase at","transfer to","payment to","withdrawal",
+                        "fee","charge","debit","topup"
+                    ])
+                    is_credit = any(x in rl for x in [
+                        "transfer from","received","deposit","credit","interest",
+                        "loan disbursement"
+                    ])
+                    if not is_debit and not is_credit:
+                        is_debit = True  # AMK defaults to debit
+
+                    # Clean description
+                    desc = AMT_RE.sub("", rest)
+                    desc = re.sub(r"\d{2}-[A-Za-z]{3}-\d{4}", "", desc)
+                    desc = re.sub(r"\d{2}:\d{2}:\d{2}\s*[AP]M", "", desc)
+                    desc = re.sub(r"External Txn Ref#\s*\S+", "", desc)
+                    desc = re.sub(r"Txn Ref#\s*\S+", "", desc)
+                    desc = re.sub(r"[A-Z0-9]{10,}", "", desc)
+                    desc = re.sub(r"\s+", " ", desc).strip()[:100]
+
+                    if amount > 0:
+                        transactions.append({
+                            "date":      trx_date,
+                            "desc":      desc,
+                            "money_in":  round(amount, 2) if is_credit else 0.0,
+                            "money_out": round(amount, 2) if is_debit  else 0.0,
                             "balance":   round(balance, 2),
                         })
                 else:
