@@ -116,6 +116,8 @@ class BankStatementParser:
         if "ABAAKHPP"    in p: return "ABA"
         if "WIGCKHPPXXX" in p: return "WING"
         if "ACLBKHPP"    in p: return "ACLEDA"
+        if "TXN DATE TIME" in p: return "AMRET"
+        if "DEBIT AMOUNT" in p and "CREDIT AMOUNT" in p: return "AMRET"
         if "ACLEDA"      in p: return "ACLEDA"
         if "CADIKHPP"    in p: return "CANADIA"
         if "HLFBKHPP"    in p: return "HATTHA"
