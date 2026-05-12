@@ -168,7 +168,11 @@ HTML_SHELL = """<!DOCTYPE html>
 
 
 def _shell(title, body, scripts=""):
-    return HTML_SHELL.format(title=title, css=CSS, body=body, scripts=scripts)
+    return (HTML_SHELL
+        .replace("{title}", title)
+        .replace("{css}", CSS)
+        .replace("{body}", body)
+        .replace("{scripts}", scripts))
 
 
 def _pill(status: str) -> str:
