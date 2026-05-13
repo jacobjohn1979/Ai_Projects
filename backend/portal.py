@@ -605,7 +605,7 @@ async def submit_pdf(request: Request, applicant_id: str = Form(""), file: Uploa
     async with httpx.AsyncClient(base_url="http://api:8001") as c:
         r = await c.post("/screen-pdf",
             files={"file": (file.filename, await file.read(), file.content_type)},
-            data={"applicant_id": applicant_id}, timeout=60)
+            data={"applicant_id": applicant_id}, timeout=300)
     if r.status_code == 200:
         res  = r.json()
         risk = res.get("risk", {})
@@ -620,7 +620,7 @@ async def submit_image(request: Request, applicant_id: str = Form(""), file: Upl
     async with httpx.AsyncClient(base_url="http://api:8001") as c:
         r = await c.post("/screen-image",
             files={"file": (file.filename, await file.read(), file.content_type)},
-            data={"applicant_id": applicant_id}, timeout=60)
+            data={"applicant_id": applicant_id}, timeout=300)
     if r.status_code == 200:
         return RedirectResponse("/portal/cases?msg=Image+screened+successfully", 303)
     return RedirectResponse("/portal/submit?error=Image+screening+failed", 303)
@@ -637,7 +637,7 @@ async def submit_idcard(request: Request, applicant_id: str = Form(""), callback
     data = {"applicant_id": applicant_id}
     if callback_url: data["callback_url"] = callback_url
     async with httpx.AsyncClient(base_url="http://api:8001") as c:
-        r = await c.post("/screen-id-card", files=files, data=data, timeout=60)
+        r = await c.post("/screen-id-card", files=files, data=data, timeout=300)
     if r.status_code == 202:
         return RedirectResponse("/portal/submit?success=ID+card+queued.+Use+Poll+box+to+check+result.", 303)
     return RedirectResponse("/portal/submit?error=ID+card+submission+failed", 303)
@@ -948,7 +948,7 @@ async def batch_submit(request: Request, zipfile: UploadFile = File(...), callba
                             if callback_url: data["callback_url"] = callback_url
                             r = await client.post("/screen-id-card",
                                 files={"file":(name,z.read(name),"image/jpeg")},
-                                data=data, timeout=30)
+                                data=data, timeout=120)
                             submitted += 1 if r.status_code==202 else 0
                             errors    += 0 if r.status_code==202 else 1
                         except: errors += 1
