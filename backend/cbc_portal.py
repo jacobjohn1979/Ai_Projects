@@ -397,7 +397,7 @@ def progress_page(uid: str):
       </div>
     </div>
     <script>
-    const uid    = ' + uid_js + ';'
+    const uid    = {uid_js};
     const logBox = document.getElementById('log-box');
     const pbar   = document.getElementById('pbar');
     const statT  = document.getElementById('status-text');
