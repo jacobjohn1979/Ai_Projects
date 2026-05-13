@@ -368,7 +368,13 @@ async def extract(pdf_file: UploadFile = File(...)):
 
 @app.get("/progress/{uid}", response_class=HTMLResponse)
 def progress_page(uid: str):
-    _start_extraction(uid)
+    import threading, asyncio
+    def _run():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_extraction(uid))
+        loop.close()
+    threading.Thread(target=_run, daemon=True).start()
     uid_js = json.dumps(uid)
     body = f"""
     <div style="max-width:700px;margin:0 auto">
