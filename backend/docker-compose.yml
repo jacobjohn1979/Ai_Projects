@@ -171,6 +171,17 @@ services:
     networks:
       - internal
 
+
+  # ── Auth Service ──────────────────────────────────────────────────────────────
+  auth-service:
+    <<: [*app-build, *app-env]
+    restart: unless-stopped
+    command: uvicorn auth_service:app --host 0.0.0.0 --port 8010
+    volumes:
+      - uploads:/app/uploads
+    networks:
+      - internal
+
   # ── Bank Format Trainer ──────────────────────────────────────────────────────
   bank-trainer:
     <<: [*app-build, *app-env]
