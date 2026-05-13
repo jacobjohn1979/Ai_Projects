@@ -144,7 +144,7 @@ HTML_SHELL = """<!DOCTYPE html>
   <title>CBC Credit Analysis — {title}</title>
   <style>{css}</style>
 </head>
-<body data-uid="{uid}">
+<body>
   <div class="topbar">
     <div class="brand">
       <div class="brand-icon">CBC</div>
@@ -363,11 +363,13 @@ async def extract(pdf_file: UploadFile = File(...)):
         "pdf_path": str(pdf_path),
         "size_mb":  round(len(content)/1024/1024, 2),
     }))
-    return JSONResponse({"uid": uid, "redirect": "/cbc/progress/{uid}"})
+    return JSONResponse({"uid": uid, "redirect": f"/cbc/progress/{uid}"})
 
 
 @app.get("/progress/{uid}", response_class=HTMLResponse)
 def progress_page(uid: str):
+    _start_extraction(uid)
+    uid_js = json.dumps(uid)
     body = f"""
     <div style="max-width:700px;margin:0 auto">
       <h1 style="font-size:20px;font-weight:700;margin-bottom:6px">Processing CBC Report</h1>
@@ -389,7 +391,7 @@ def progress_page(uid: str):
       </div>
     </div>
     <script>
-    const uid    = document.body.dataset.uid;
+    const uid    = ' + uid_js + ';'
     const logBox = document.getElementById('log-box');
     const pbar   = document.getElementById('pbar');
     const statT  = document.getElementById('status-text');
@@ -506,8 +508,8 @@ async def run_extraction(uid: str):
             append(f"❌ Error: {e}", "#f87171")
             append(traceback.format_exc(), "#f87171")
 
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, run)
+    import threading
+    threading.Thread(target=run, daemon=True).start()
     return JSONResponse({"started": True})
 
 
