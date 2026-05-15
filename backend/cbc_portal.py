@@ -154,9 +154,9 @@ HTML_SHELL = """<!DOCTYPE html>
       </div>
     </div>
     <div class="nav-links">
-      <a href="/cbc/" class="nav-link">Upload</a>
-      <a href="/loan/" class="nav-link">Loan Portal</a>
-      <a href="/portal/" class="nav-link">KYC Portal</a>
+      <a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>
+      <a href="/cbc/" class="nav-link">&#x1F4CA; CBC</a>
+      <a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>
     </div>
   </div>
   <div class="content">
@@ -575,7 +575,8 @@ def result_page(uid: str):
         <h1 style="font-size:20px;font-weight:700">✅ CBC Extraction Complete</h1>
       </div>
       <div style="display:flex;gap:10px">
-        <a href="/cbc/download/{uid}" class="btn btn-primary btn-lg">⬇ Download Excel</a>
+        <a href="/cbc/download/{uid}" class="btn btn-primary btn-lg">&#x2B07; Download Excel</a>
+        <a href="/cbc/pdf/{uid}" target="_blank" class="btn btn-ghost" style="border-color:#1a5276;color:#1a5276">&#x1F4C4; View PDF Summary</a>
         <a href="/cbc/" class="btn btn-ghost">Upload Another</a>
       </div>
     </div>
@@ -872,6 +873,103 @@ def download_excel(uid: str):
 @app.get("/api/extract")
 def api_status():
     return {"status": "running", "service": "cbc-portal", "version": "1.0.0"}
+
+
+
+@app.get("/pdf/{uid}")
+def pdf_summary(uid: str):
+    """Generate PDF summary of CBC result."""
+    rf = UPLOAD_DIR / f"{uid}_result.json"
+    if not rf.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    data = json.loads(rf.read_text())
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.enums import TA_CENTER
+    import io
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm,
+                            leftMargin=1.5*cm, rightMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    story  = []
+    navy   = colors.HexColor("#1a5276")
+    light  = colors.HexColor("#d6eaf8")
+    white  = colors.white
+
+    title_s = ParagraphStyle("t", fontSize=16, fontName="Helvetica-Bold",
+                              textColor=navy, alignment=TA_CENTER, spaceAfter=6)
+    sub_s   = ParagraphStyle("s", fontSize=10, textColor=colors.grey,
+                              alignment=TA_CENTER, spaceAfter=12)
+
+    subject = data.get("subject", {})
+    story.append(Paragraph("CBC CREDIT BUREAU REPORT SUMMARY", title_s))
+    story.append(Paragraph(f"Generated: {data.get('extracted_at','')[:10]}", sub_s))
+    story.append(Spacer(1, 0.3*cm))
+
+    info_data = [
+        ["Name", str(subject.get("name","")), "NID", str(subject.get("nid",""))],
+        ["Gender", str(subject.get("gender","")), "DOB", str(subject.get("dob",""))],
+        ["Score", str(data.get("credit_score","")), "Rating", str(data.get("rating",""))],
+    ]
+    info_t = Table(info_data, colWidths=[3*cm,6*cm,3*cm,6*cm])
+    info_t.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(-1,-1),light),
+        ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),
+        ("FONTNAME",(2,0),(2,-1),"Helvetica-Bold"),
+        ("FONTSIZE",(0,0),(-1,-1),9),
+        ("GRID",(0,0),(-1,-1),0.5,white),
+        ("TOPPADDING",(0,0),(-1,-1),5),
+        ("BOTTOMPADDING",(0,0),(-1,-1),5),
+    ]))
+    story.append(info_t)
+    story.append(Spacer(1, 0.4*cm))
+
+    # Loans summary
+    loans = data.get("loans", [])
+    if loans:
+        story.append(Paragraph("Loan Summary", ParagraphStyle("h2", fontSize=11,
+                    fontName="Helvetica-Bold", textColor=navy, spaceAfter=6)))
+        l_data = [["#","Lender","Type","Amount","Status","Outstanding"]]
+        for i, loan in enumerate(loans[:20], 1):
+            l_data.append([
+                str(i),
+                str(loan.get("lender",""))[:20],
+                str(loan.get("loan_type","")),
+                str(loan.get("loan_amount","")),
+                str(loan.get("status","")),
+                str(loan.get("outstanding","")),
+            ])
+        l_t = Table(l_data, colWidths=[0.8*cm,4.5*cm,2.5*cm,2.5*cm,2.5*cm,2.5*cm])
+        l_t.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,0),navy),
+            ("TEXTCOLOR",(0,0),(-1,0),white),
+            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+            ("FONTSIZE",(0,0),(-1,-1),8),
+            ("GRID",(0,0),(-1,-1),0.3,colors.lightgrey),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),[white,light]),
+            ("TOPPADDING",(0,0),(-1,-1),4),
+            ("BOTTOMPADDING",(0,0),(-1,-1),4),
+        ]))
+        story.append(l_t)
+
+    from datetime import datetime
+    story.append(Spacer(1, 0.4*cm))
+    story.append(Paragraph(
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Banking KYC Fraud Detection System",
+        ParagraphStyle("footer", fontSize=7, textColor=colors.grey, alignment=TA_CENTER)
+    ))
+
+    doc.build(story)
+    buf.seek(0)
+    return StreamingResponse(buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="CBC_Summary_{uid}.pdf"'})
 
 
 @app.get("/health")

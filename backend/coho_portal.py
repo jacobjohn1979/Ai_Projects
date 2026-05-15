@@ -98,9 +98,9 @@ def page(title, body):
          <div class="brand-sub">Bank Statement PDF to Excel</div></div>
   </div>
   <div class="nav-links">
-    <a href="/coho/" class="nav-link">Upload</a>
-    <a href="/cbc/" class="nav-link">CBC Portal</a>
-    <a href="/loan/" class="nav-link">Loan Portal</a>
+    <a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>
+    <a href="/cbc/" class="nav-link">&#x1F4CA; CBC</a>
+    <a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>
   </div>
 </div>
 <div class="content">{body}</div>
@@ -418,7 +418,8 @@ def result(uid: str):
         '<div><h1 style="font-size:20px;font-weight:700">Extraction Complete</h1>'
         '<p style="font-size:13px;color:#64748b;margin-top:3px">' + period + '</p></div>'
         '<div style="display:flex;gap:10px">'
-        '<a href="/coho/download/' + uid + '" class="btn btn-primary btn-lg">Download Excel</a>'
+        '<a href="/coho/download/' + uid + '" class="btn btn-primary btn-lg">&#x2B07; Download Excel</a>'
+        '<a href="/coho/pdf/' + uid + '" target="_blank" class="btn btn-ghost" style="border-color:#1F4E79;color:#1F4E79">&#x1F4C4; View PDF Summary</a>'
         '<a href="/coho/" class="btn btn-ghost">Upload Another</a></div></div>'
         '<div class="card"><div class="card-title">Account Information</div>'
         '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:12px">'
@@ -436,7 +437,8 @@ def result(uid: str):
         '<th>Debit</th><th>Credit</th><th>Balance</th><th></th></tr></thead>'
         '<tbody>' + thtml + '</tbody></table></div></div>'
         '<div style="text-align:center;padding:20px">'
-        '<a href="/coho/download/' + uid + '" class="btn btn-primary btn-lg">Download COHO Excel</a></div>'
+        '<a href="/coho/download/' + uid + '" class="btn btn-primary btn-lg">&#x2B07; Download Excel</a>'
+        '<a href="/coho/pdf/' + uid + '" target="_blank" class="btn btn-ghost" style="border-color:#1F4E79;color:#1F4E79;margin-left:10px">&#x1F4C4; View PDF Summary</a></div>'
     )
     return HTMLResponse(page("Results", body))
 
@@ -529,6 +531,161 @@ def retry_job(uid: str):
     _start_extraction(uid)
     from fastapi.responses import RedirectResponse
     return RedirectResponse(f"/coho/progress/{uid}", status_code=303)
+
+
+@app.get("/pdf/{uid}")
+def pdf_summary(uid: str):
+    """Generate a PDF summary of the COHO result."""
+    rf = UPLOAD_DIR / (uid + "_result.json")
+    if not rf.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    data   = json.loads(rf.read_text())
+    header = data.get("header", {})
+    an     = data.get("analytics", {})
+    mrows  = data.get("monthly_rows", [])
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    import io
+
+    buf    = io.BytesIO()
+    doc    = SimpleDocTemplate(buf, pagesize=A4,
+                               topMargin=1.5*cm, bottomMargin=1.5*cm,
+                               leftMargin=1.5*cm, rightMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    story  = []
+
+    navy   = colors.HexColor("#1F4E79")
+    light  = colors.HexColor("#D6E4F0")
+    white  = colors.white
+    red    = colors.HexColor("#dc2626")
+    green  = colors.HexColor("#059669")
+
+    title_style = ParagraphStyle("title", fontSize=16, fontName="Helvetica-Bold",
+                                  textColor=navy, alignment=TA_CENTER, spaceAfter=6)
+    sub_style   = ParagraphStyle("sub", fontSize=10, textColor=colors.grey,
+                                  alignment=TA_CENTER, spaceAfter=12)
+    label_style = ParagraphStyle("label", fontSize=9, fontName="Helvetica-Bold",
+                                  textColor=navy)
+
+    currency = header.get("currency","USD")
+    sym, fmt = ("KHR", lambda v: "{:,.0f}".format(float(v))) if currency=="KHR"                else ("$", lambda v: "{:,.2f}".format(float(v)))
+
+    period = str(header.get("period_from",""))[:10] + " to " + str(header.get("period_to",""))[:10]
+
+    story.append(Paragraph("CONDUCT OF ACCOUNT (COHO) SUMMARY", title_style))
+    story.append(Paragraph(f"Period: {period}", sub_style))
+    story.append(Spacer(1, 0.3*cm))
+
+    # Account info table
+    info_data = [
+        ["Bank", str(header.get("bank","")),      "Account No.", str(header.get("account_no",""))],
+        ["Holder", str(header.get("holder_name","")), "Currency", str(header.get("currency",""))],
+        ["Opening Bal.", sym+" "+fmt(header.get("opening_balance",0)),
+         "Closing Bal.", sym+" "+fmt(header.get("ending_balance",0))],
+    ]
+    info_table = Table(info_data, colWidths=[3*cm,6*cm,3*cm,6*cm])
+    info_table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0),(-1,-1), light),
+        ("FONTNAME",   (0,0),(0,-1), "Helvetica-Bold"),
+        ("FONTNAME",   (2,0),(2,-1), "Helvetica-Bold"),
+        ("FONTSIZE",   (0,0),(-1,-1), 9),
+        ("GRID",       (0,0),(-1,-1), 0.5, colors.white),
+        ("ROWBACKGROUNDS",(0,0),(-1,-1),[light, colors.HexColor("#EAF2F8")]),
+        ("TOPPADDING", (0,0),(-1,-1), 5),
+        ("BOTTOMPADDING",(0,0),(-1,-1),5),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # Summary stats
+    stats_data = [
+        ["Total Transactions", "Total In", "Total Out", "Avg Balance", "Months"],
+        [str(data.get("total_transactions",0)),
+         sym+" "+fmt(an.get("total_in_amt",0)),
+         sym+" "+fmt(an.get("total_out_amt",0)),
+         sym+" "+fmt(an.get("avg_closing_bal",0)),
+         str(an.get("period_months",0))],
+    ]
+    stats_table = Table(stats_data, colWidths=[3.6*cm]*5)
+    stats_table.setStyle(TableStyle([
+        ("BACKGROUND",  (0,0),(-1,0), navy),
+        ("TEXTCOLOR",   (0,0),(-1,0), white),
+        ("FONTNAME",    (0,0),(-1,0), "Helvetica-Bold"),
+        ("FONTSIZE",    (0,0),(-1,-1), 9),
+        ("ALIGN",       (0,0),(-1,-1), "CENTER"),
+        ("GRID",        (0,0),(-1,-1), 0.5, colors.white),
+        ("BACKGROUND",  (0,1),(-1,1), light),
+        ("TOPPADDING",  (0,0),(-1,-1), 6),
+        ("BOTTOMPADDING",(0,0),(-1,-1),6),
+    ]))
+    story.append(stats_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # Monthly breakdown
+    story.append(Paragraph("Monthly Breakdown", ParagraphStyle("h2", fontSize=11,
+                fontName="Helvetica-Bold", textColor=navy, spaceAfter=6)))
+
+    m_header = ["#", "Month", "Debit Trx", "Debit Amt", "Credit Trx", "Credit Amt",
+                "Avg Bal", "Lowest", "Highest"]
+    m_data   = [m_header]
+    for mr in mrows:
+        m_data.append([
+            str(mr.get("no","")),
+            str(mr.get("month",""))[:7],
+            str(mr.get("debit_trx",0)),
+            fmt(mr.get("debit_amt",0)),
+            str(mr.get("credit_trx",0)),
+            fmt(mr.get("credit_amt",0)),
+            fmt(mr.get("avg_bal",0)),
+            fmt(mr.get("lowest_bal",0)),
+            fmt(mr.get("highest_bal",0)),
+        ])
+    # Totals row
+    m_data.append([
+        "","TOTAL",
+        str(an.get("total_out_trx",0)), fmt(an.get("total_out_amt",0)),
+        str(an.get("total_in_trx",0)),  fmt(an.get("total_in_amt",0)),
+        "","",""
+    ])
+
+    col_w = [0.8*cm, 2*cm, 1.6*cm, 2.2*cm, 1.6*cm, 2.2*cm, 2.2*cm, 2.2*cm, 2.2*cm]
+    m_table = Table(m_data, colWidths=col_w)
+    m_table.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0),(-1,0), navy),
+        ("TEXTCOLOR",     (0,0),(-1,0), white),
+        ("FONTNAME",      (0,0),(-1,0), "Helvetica-Bold"),
+        ("FONTSIZE",      (0,0),(-1,-1), 8),
+        ("ALIGN",         (2,0),(-1,-1), "RIGHT"),
+        ("GRID",          (0,0),(-1,-1), 0.3, colors.lightgrey),
+        ("ROWBACKGROUNDS",(0,1),(-2,-1),[white, light]),
+        ("BACKGROUND",    (0,-1),(-1,-1), colors.HexColor("#FFF9C4")),
+        ("FONTNAME",      (0,-1),(-1,-1), "Helvetica-Bold"),
+        ("TOPPADDING",    (0,0),(-1,-1), 4),
+        ("BOTTOMPADDING", (0,0),(-1,-1), 4),
+    ]))
+    story.append(m_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # Footer
+    from datetime import datetime
+    story.append(Paragraph(
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Banking KYC Fraud Detection System",
+        ParagraphStyle("footer", fontSize=7, textColor=colors.grey, alignment=TA_CENTER)
+    ))
+
+    doc.build(story)
+    buf.seek(0)
+    fname = f"COHO_Summary_{uid}.pdf"
+    return StreamingResponse(buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}"'})
+
 
 @app.get("/health")
 def health():
