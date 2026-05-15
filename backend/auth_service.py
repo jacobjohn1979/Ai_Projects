@@ -296,39 +296,22 @@ def logout(request: Request):
 # ── TOKEN VALIDATION (called by other portals) ────────────────────────────────
 
 @app.get("/validate")
-def validate(request: Request, path: str = "/"):
-    """
-    Called by nginx auth_request to validate token.
-    Returns 200 with user info headers if valid, 401 if not.
-    """
+def validate(request: Request, path: str = ""):
+    """Called by nginx auth_request to validate token."""
     token = _get_token_from_request(request)
     if not token:
         return JSONResponse({"error": "no token"}, status_code=401)
-
     payload = _verify_token(token)
     if not payload:
         return JSONResponse({"error": "invalid token"}, status_code=401)
-
-    role    = payload.get("role","")
-    allowed = ROLE_ACCESS.get(role, [])
-
-    # Get path from query param or X-Original-URI header
-    check_path = path or request.headers.get("X-Original-URI", "/")
-
-    # Admins can access everything
+    role = payload.get("role", "")
     if role == "admin":
         return JSONResponse({"username": payload.get("sub"), "role": role})
-
-    # Check role access
-    path_allowed = any(check_path.startswith(p) for p in allowed)
-    if not path_allowed:
+    check_path = path or request.headers.get("X-Original-URI", "/")
+    allowed = ROLE_ACCESS.get(role, [])
+    if not any(check_path.startswith(p) for p in allowed):
         return JSONResponse({"error": "forbidden"}, status_code=403)
-
-    return JSONResponse({
-        "username": payload.get("sub"),
-        "role":     role,
-        "exp":      payload.get("exp"),
-    })
+    return JSONResponse({"username": payload.get("sub"), "role": role})
 
 # ── API: CHECK (for portals to call internally) ───────────────────────────────
 
