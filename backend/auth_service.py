@@ -210,11 +210,16 @@ def login_page(error="", redirect=""):
 # ── LOGIN ─────────────────────────────────────────────────────────────────────
 
 @app.get("/login", response_class=HTMLResponse)
-def get_login(request: Request, redirect: str = "/"):
-    # Already logged in?
+def get_login(request: Request, redirect: str = ""):
+    # Already logged in with valid token?
     token = _get_token_from_request(request)
-    if token and _verify_token(token):
-        return RedirectResponse(redirect or "/", status_code=302)
+    if token:
+        payload = _verify_token(token)
+        if payload:
+            role    = payload.get("role","")
+            allowed = ROLE_ACCESS.get(role,[])
+            dest    = redirect if redirect and not redirect.startswith("/auth") else (allowed[0] if allowed else "/")
+            return RedirectResponse(dest, status_code=302)
     return HTMLResponse(login_page(redirect=redirect))
 
 @app.post("/login")
@@ -296,22 +301,32 @@ def logout(request: Request):
 # ── TOKEN VALIDATION (called by other portals) ────────────────────────────────
 
 @app.get("/validate")
-def validate(request: Request, path: str = ""):
-    """Called by nginx auth_request to validate token."""
+def validate(request: Request, path: str = "/"):
+    """
+    Called by nginx auth_request to validate token.
+    Returns 200 with user info headers if valid, 401 if not.
+    """
     token = _get_token_from_request(request)
     if not token:
         return JSONResponse({"error": "no token"}, status_code=401)
+
     payload = _verify_token(token)
     if not payload:
         return JSONResponse({"error": "invalid token"}, status_code=401)
-    role = payload.get("role", "")
-    if role == "admin":
-        return JSONResponse({"username": payload.get("sub"), "role": role})
-    check_path = path or request.headers.get("X-Original-URI", "/")
+
+    role    = payload.get("role","")
     allowed = ROLE_ACCESS.get(role, [])
-    if not any(check_path.startswith(p) for p in allowed):
+
+    # Check if this role can access the requested path
+    path_allowed = any(path.startswith(p) for p in allowed)
+    if not path_allowed:
         return JSONResponse({"error": "forbidden"}, status_code=403)
-    return JSONResponse({"username": payload.get("sub"), "role": role})
+
+    return JSONResponse({
+        "username": payload.get("sub"),
+        "role":     role,
+        "exp":      payload.get("exp"),
+    })
 
 # ── API: CHECK (for portals to call internally) ───────────────────────────────
 
