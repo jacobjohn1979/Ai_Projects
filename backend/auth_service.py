@@ -312,8 +312,15 @@ def validate(request: Request, path: str = "/"):
     role    = payload.get("role","")
     allowed = ROLE_ACCESS.get(role, [])
 
-    # Check if this role can access the requested path
-    path_allowed = any(path.startswith(p) for p in allowed)
+    # Get path from query param or X-Original-URI header
+    check_path = path or request.headers.get("X-Original-URI", "/")
+
+    # Admins can access everything
+    if role == "admin":
+        return JSONResponse({"username": payload.get("sub"), "role": role})
+
+    # Check role access
+    path_allowed = any(check_path.startswith(p) for p in allowed)
     if not path_allowed:
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
