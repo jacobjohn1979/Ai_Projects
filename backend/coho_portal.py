@@ -69,6 +69,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .trx-table tr.debit td{background:#fff5f5}
 .trx-table tr.closing td{background:#fffde7}
 .month-table{width:100%;border-collapse:collapse;font-size:12px}
+@media print {
+  body { background: white !important; font-size: 11px !important; }
+  .topbar { display: none !important; }
+  .no-print { display: none !important; }
+  .card { box-shadow: none !important; border: 1px solid #ccc !important; 
+          margin-bottom: 10px !important; break-inside: avoid; }
+  .stat-grid { grid-template-columns: repeat(4,1fr) !important; }
+  .btn { display: none !important; }
+  a.btn { display: none !important; }
+  .print-header { display: block !important; }
+  @page { margin: 1.5cm; size: A4; }
+}
+.print-header { display: none; }
+
 .month-table th{background:var(--blue-light);color:var(--blue-dark);padding:8px;
                 text-align:center;font-weight:700;border:1px solid #bdd7ee}
 .month-table td{padding:7px 8px;border:1px solid #e2e8f0;text-align:right}
@@ -103,7 +117,12 @@ def page(title, body):
     <a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>
   </div>
 </div>
-<div class="content">{body}</div>
+<div class="content">
+<div class="print-header" style="text-align:center;padding:10px 0 20px;border-bottom:2px solid #1F4E79;margin-bottom:20px">
+  <div style="font-size:18px;font-weight:700;color:#1F4E79">Conduct of Account (COHO) Summary</div>
+  <div style="font-size:12px;color:#64748b;margin-top:4px">Banking KYC Fraud Detection System</div>
+</div>
+{body}</div>
 </body></html>"""
 
 
@@ -419,8 +438,8 @@ def result(uid: str):
         '<p style="font-size:13px;color:#64748b;margin-top:3px">' + period + '</p></div>'
         '<div style="display:flex;gap:10px">'
         '<a href="/coho/download/' + uid + '" class="btn btn-primary btn-lg">&#x2B07; Download Excel</a>'
-        '<a href="/coho/pdf/' + uid + '" target="_blank" class="btn btn-ghost" style="border-color:#1F4E79;color:#1F4E79">&#x1F4C4; View PDF Summary</a>'
-        '<a href="/coho/" class="btn btn-ghost">Upload Another</a></div></div>'
+        '<button onclick="window.print()" class="btn btn-ghost no-print" style="border-color:#1F4E79;color:#1F4E79">&#x1F5B6; Print / Save PDF</button>'
+        '<a href="/coho/" class="btn btn-ghost no-print">Upload Another</a></div></div>'
         '<div class="card"><div class="card-title">Account Information</div>'
         '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:12px">'
         '<div><span style="color:#64748b">Bank: </span><strong>' + str(header.get("bank", "")) + '</strong></div>'
@@ -437,8 +456,8 @@ def result(uid: str):
         '<th>Debit</th><th>Credit</th><th>Balance</th><th></th></tr></thead>'
         '<tbody>' + thtml + '</tbody></table></div></div>'
         '<div style="text-align:center;padding:20px">'
-        '<a href="/coho/download/' + uid + '" class="btn btn-primary btn-lg">&#x2B07; Download Excel</a>'
-        '<a href="/coho/pdf/' + uid + '" target="_blank" class="btn btn-ghost" style="border-color:#1F4E79;color:#1F4E79;margin-left:10px">&#x1F4C4; View PDF Summary</a></div>'
+        '<a href="/coho/download/' + uid + '" class="btn btn-primary btn-lg no-print">&#x2B07; Download Excel</a>'
+        '<button onclick="window.print()" class="btn btn-ghost" style="border-color:#1F4E79;color:#1F4E79;margin-left:10px">&#x1F5B6; Print / Save PDF</button></div>'
     )
     return HTMLResponse(page("Results", body))
 
@@ -605,12 +624,18 @@ def pdf_summary(uid: str):
 
     # Summary stats
     stats_data = [
-        ["Total Transactions", "Total In", "Total Out", "Avg Balance", "Months"],
+        ["Total Transactions", "Total In (Trx)", "Total Out (Trx)", "Avg Balance", "Months"],
         [str(data.get("total_transactions",0)),
-         sym+" "+fmt(an.get("total_in_amt",0)),
-         sym+" "+fmt(an.get("total_out_amt",0)),
+         sym+" "+fmt(an.get("total_in_amt",0))+" ("+str(an.get("total_in_trx",0))+")",
+         sym+" "+fmt(an.get("total_out_amt",0))+" ("+str(an.get("total_out_trx",0))+")",
          sym+" "+fmt(an.get("avg_closing_bal",0)),
          str(an.get("period_months",0))],
+        ["Highest Balance", "Lowest Balance", "Avg Monthly In", "Avg Monthly Out", "Reversals"],
+        [sym+" "+fmt(an.get("highest_balance",0)),
+         sym+" "+fmt(an.get("lowest_balance",0)),
+         sym+" "+fmt(an.get("avg_monthly_in_amt",0)),
+         sym+" "+fmt(an.get("avg_monthly_out_amt",0)),
+         sym+" "+fmt(an.get("reversal_amt",0))],
     ]
     stats_table = Table(stats_data, colWidths=[3.6*cm]*5)
     stats_table.setStyle(TableStyle([
@@ -631,8 +656,8 @@ def pdf_summary(uid: str):
     story.append(Paragraph("Monthly Breakdown", ParagraphStyle("h2", fontSize=11,
                 fontName="Helvetica-Bold", textColor=navy, spaceAfter=6)))
 
-    m_header = ["#", "Month", "Debit Trx", "Debit Amt", "Credit Trx", "Credit Amt",
-                "Avg Bal", "Lowest", "Highest"]
+    m_header = ["#", "Month", "Debit\nTrx", "Debit Amt", "Credit\nTrx", "Credit Amt",
+                "Avg Bal", "Lowest Bal", "Highest Bal"]
     m_data   = [m_header]
     for mr in mrows:
         m_data.append([

@@ -134,6 +134,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .step-line{flex:1;height:2px;background:var(--border);margin:0 8px}
 .step.done .step-line{background:var(--ok)}
 .amount{font-family:monospace;font-size:11px}
+
+@media print {
+  body { background: white !important; font-size: 11px !important; }
+  .topbar { display: none !important; }
+  .no-print { display: none !important; }
+  .card { box-shadow: none !important; border: 1px solid #ccc !important;
+          margin-bottom: 10px !important; break-inside: avoid; }
+  .btn { display: none !important; }
+  a.btn { display: none !important; }
+  .print-header { display: block !important; }
+  @page { margin: 1.5cm; size: A4; }
+}
+.print-header { display: none; }
 """
 
 HTML_SHELL = """<!DOCTYPE html>
@@ -160,6 +173,10 @@ HTML_SHELL = """<!DOCTYPE html>
     </div>
   </div>
   <div class="content">
+    <div class="print-header" style="text-align:center;padding:10px 0 20px;border-bottom:2px solid #1a5276;margin-bottom:20px">
+      <div style="font-size:18px;font-weight:700;color:#1a5276">CBC Credit Bureau Report Summary</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">Banking KYC Fraud Detection System</div>
+    </div>
     {body}
   </div>
   {scripts}
@@ -575,9 +592,9 @@ def result_page(uid: str):
         <h1 style="font-size:20px;font-weight:700">✅ CBC Extraction Complete</h1>
       </div>
       <div style="display:flex;gap:10px">
-        <a href="/cbc/download/{uid}" class="btn btn-primary btn-lg">&#x2B07; Download Excel</a>
-        <a href="/cbc/pdf/{uid}" target="_blank" class="btn btn-ghost" style="border-color:#1a5276;color:#1a5276">&#x1F4C4; View PDF Summary</a>
-        <a href="/cbc/" class="btn btn-ghost">Upload Another</a>
+        <a href="/cbc/download/{uid}" class="btn btn-primary btn-lg no-print">&#x2B07; Download Excel</a>
+        <button onclick="window.print()" class="btn btn-ghost no-print" style="border-color:#1a5276;color:#1a5276">&#x1F5B6; Print / Save PDF</button>
+        <a href="/cbc/" class="btn btn-ghost no-print">Upload Another</a>
       </div>
     </div>
 
