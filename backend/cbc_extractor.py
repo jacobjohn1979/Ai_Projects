@@ -632,14 +632,15 @@ def fill_excel_template(data: dict, output_path: str,
     """
     if template_path and Path(template_path).exists():
         wb = openpyxl.load_workbook(template_path)
-        # Clear existing sheets — we will rebuild them
-        for sname in wb.sheetnames:
+        # Clear data but keep at least one sheet visible
+        for sname in list(wb.sheetnames)[1:]:
             del wb[sname]
+        if wb.worksheets:
+            wb.worksheets[0].sheet_state = 'visible'
+            wb.active = wb.worksheets[0]
     else:
         wb = openpyxl.Workbook()
-        # Remove default sheet
-        if "Sheet" in wb.sheetnames:
-            del wb["Sheet"]
+        # Keep default sheet as placeholder
 
     header     = data.get("header", {})
     applicants = data.get("applicants", [])
@@ -670,10 +671,17 @@ def fill_excel_template(data: dict, output_path: str,
         wb.worksheets[0].sheet_state = 'visible'
         wb.active = wb.worksheets[0]
     # Ensure at least one sheet is visible before saving
+    if not wb.worksheets:
+        wb.create_sheet("Summary")
     has_visible = any(ws.sheet_state != 'hidden' for ws in wb.worksheets)
-    if not has_visible and wb.worksheets:
+    if not has_visible:
         wb.worksheets[0].sheet_state = 'visible'
         wb.active = wb.worksheets[0]
+    elif wb.active is None or wb.active.sheet_state == 'hidden':
+        for ws in wb.worksheets:
+            if ws.sheet_state != 'hidden':
+                wb.active = ws
+                break
     wb.save(output_path)
     return output_path
 
