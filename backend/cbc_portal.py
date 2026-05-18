@@ -816,7 +816,7 @@ def _build_applicant_panel(app: dict, idx: int, active_cls: str) -> str:
             <tr><td style="color:var(--muted);padding:3px 0;width:40%">Full Name</td>
                 <td><strong>{p.get("full_name_en","—")}</strong></td></tr>
             <tr><td style="color:var(--muted);padding:3px 0">ID Number</td>
-                <td>{p.get("id_number","—")} ({p.get("id_type","").split()[0]})</td></tr>
+                <td>{p.get("id_number","—")} ({(p.get("id_type","").split() or [""])[0]})</td></tr>
             <tr><td style="color:var(--muted);padding:3px 0">Date of Birth</td>
                 <td>{p.get("dob","—")}</td></tr>
             <tr><td style="color:var(--muted);padding:3px 0">Gender</td>
