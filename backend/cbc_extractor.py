@@ -735,6 +735,12 @@ def fill_excel_template(data: dict, output_path: str,
             if ws.sheet_state != 'hidden':
                 wb.active = ws
                 break
+    # Ensure at least one sheet visible
+    if not wb.worksheets:
+        wb.create_sheet("Summary")
+    if not any(ws.sheet_state != 'hidden' for ws in wb.worksheets):
+        wb.worksheets[0].sheet_state = 'visible'
+        wb.active = wb.worksheets[0]
     wb.save(output_path)
     return output_path
 
