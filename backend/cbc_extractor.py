@@ -87,6 +87,16 @@ class CBCParser:
     def _split_applicants(self) -> list[str]:
         """Split full text into per-applicant sections."""
         parts = re.split(r"Applicant \d+ of \d+", self.full_text)
+        # If no split occurred, check if it's a single-applicant report
+        # (no "Applicant X of Y" marker) — use text after header
+        if len(parts) == 1:
+            # Single applicant — skip the header section
+            # Header ends around "Data Provided vs" or "Applicant Type"
+            m = re.search(r"(Data Provided vs|Applicant Type\s+\w+)", self.full_text)
+            if m:
+                parts = [self.full_text[m.start():]]
+            else:
+                parts = [self.full_text]
         return [p.strip() for p in parts[1:] if p.strip()]
 
     # ── Personal info ─────────────────────────────────────────────────────────
