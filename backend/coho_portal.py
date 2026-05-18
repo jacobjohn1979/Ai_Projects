@@ -114,6 +114,7 @@ def page(title, body):
   <div class="nav-links">
     <a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>
     <a href="/cbc/" class="nav-link">&#x1F4CA; CBC</a>
+    <a href="/coho/jobs" class="nav-link">&#x1F4CB; Jobs</a>
     <a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>
   </div>
 </div>
@@ -710,6 +711,122 @@ def pdf_summary(uid: str):
     return StreamingResponse(buf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{fname}"'})
+
+
+
+@app.get("/jobs", response_class=HTMLResponse)
+def jobs_history():
+    """Show all completed and failed jobs with links to results."""
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    jobs = sorted(UPLOAD_DIR.glob("*_job.json"),
+                  key=lambda f: f.stat().st_mtime, reverse=True)
+
+    rows = ""
+    counts = {"done": 0, "error": 0, "processing": 0}
+
+    for jf in jobs[:100]:
+        uid = jf.stem.replace("_job","")
+        try:
+            job      = json.loads(jf.read_text())
+            done     = (UPLOAD_DIR / (uid+"_result.json")).exists()
+            err_file = UPLOAD_DIR / (uid+"_error.txt")
+            log_file = UPLOAD_DIR / (uid+"_log.json")
+
+            if done:
+                status = "done"; counts["done"] += 1
+                status_html = '<span style="color:#059669;font-weight:600">&#x2713; Done</span>'
+            elif err_file.exists():
+                status = "error"; counts["error"] += 1
+                status_html = '<span style="color:#dc2626;font-weight:600">&#x2717; Error</span>'
+            else:
+                status = "processing"; counts["processing"] += 1
+                status_html = '<span style="color:#d97706;font-weight:600">&#x23F3; Processing</span>'
+
+            # Get summary from result if done
+            summary = ""
+            if done:
+                try:
+                    r  = json.loads((UPLOAD_DIR/(uid+"_result.json")).read_text())
+                    an = r.get("analytics",{})
+                    h  = r.get("header",{})
+                    cur = h.get("currency","USD")
+                    sym = "KHR " if cur=="KHR" else "$ "
+                    fmt = (lambda v: "{:,.0f}".format(float(v))) if cur=="KHR" else (lambda v: "{:,.2f}".format(float(v)))
+                    summary = (f"<span style='color:#059669'>&uarr; {sym}{fmt(an.get('total_in_amt',0))}</span> "
+                               f"<span style='color:#dc2626'>&darr; {sym}{fmt(an.get('total_out_amt',0))}</span> "
+                               f"| {r.get('total_transactions',0)} txns | {an.get('period_months',0)} months")
+                except: pass
+            elif err_file.exists():
+                summary = f'<span style="color:#dc2626;font-size:11px">{err_file.read_text()[:80]}</span>'
+
+            # File modified time as upload time
+            import datetime
+            mtime = datetime.datetime.fromtimestamp(jf.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+
+            rows += f"""<tr>
+              <td style="font-size:11px;color:#94a3b8;white-space:nowrap">{mtime}</td>
+              <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                  title="{job.get('filename','?')}">{job.get('filename','?')}</td>
+              <td style="font-size:11px">{job.get('size_mb',0)} MB</td>
+              <td>{status_html}</td>
+              <td style="font-size:11px">{summary}</td>
+              <td style="white-space:nowrap">
+                {"<a href='/coho/result/"+uid+"' style='font-size:12px;color:#2563eb;margin-right:8px'>View</a>" if done else ""}
+                {"<a href='/coho/download/"+uid+"' style='font-size:12px;color:#059669;margin-right:8px'>Excel</a>" if done else ""}
+                {"<a href='/coho/retry/"+uid+"' style='font-size:12px;color:#dc2626'>Retry</a>" if status=="error" else ""}
+              </td>
+            </tr>"""
+        except Exception as e:
+            rows += f"<tr><td colspan='6' style='color:#dc2626;font-size:11px;padding:8px'>{uid}: {e}</td></tr>"
+
+    total = len(jobs)
+    body = f"""
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <div>
+        <h1 style="font-size:20px;font-weight:700">Jobs History</h1>
+        <p style="font-size:13px;color:#64748b;margin-top:3px">
+          {total} total &nbsp;|&nbsp;
+          <span style="color:#059669">&#x2713; {counts['done']} done</span> &nbsp;|&nbsp;
+          <span style="color:#dc2626">&#x2717; {counts['error']} failed</span> &nbsp;|&nbsp;
+          <span style="color:#d97706">&#x23F3; {counts['processing']} processing</span>
+        </p>
+      </div>
+      <div style="display:flex;gap:10px">
+        <a href="/coho/" class="btn btn-primary">+ New Upload</a>
+        <button onclick="if(confirm('Clear all old jobs?')){{fetch('/coho/jobs/clear',{{method:'POST'}}).then(()=>location.reload())}}"
+                class="btn btn-ghost no-print" style="color:#dc2626">Clear Old</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:#D6E4F0">
+            <th style="padding:10px;text-align:left;color:#1F4E79">Time</th>
+            <th style="padding:10px;text-align:left;color:#1F4E79">File</th>
+            <th style="padding:10px;color:#1F4E79">Size</th>
+            <th style="padding:10px;color:#1F4E79">Status</th>
+            <th style="padding:10px;text-align:left;color:#1F4E79">Summary</th>
+            <th style="padding:10px;color:#1F4E79">Actions</th>
+          </tr></thead>
+          <tbody>
+            {rows if rows else "<tr><td colspan='6' style='text-align:center;padding:30px;color:#94a3b8'>No jobs yet — upload a PDF to get started</td></tr>"}
+          </tbody>
+        </table>
+      </div>
+    </div>"""
+    return HTMLResponse(page("Jobs History", body))
+
+
+@app.post("/jobs/clear")
+def clear_old_jobs():
+    """Remove failed and old job files."""
+    removed = 0
+    for f in UPLOAD_DIR.glob("*_error.txt"):
+        uid = f.stem.replace("_error","")
+        for ext in ["_error.txt","_log.json","_job.json"]:
+            p = UPLOAD_DIR / (uid+ext)
+            if p.exists(): p.unlink(); removed += 1
+    return JSONResponse({"removed": removed})
 
 
 @app.get("/health")
