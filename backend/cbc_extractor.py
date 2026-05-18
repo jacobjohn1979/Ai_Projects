@@ -97,6 +97,10 @@ class CBCParser:
                 parts = [self.full_text[m.start():]]
             else:
                 parts = [self.full_text]
+        # For multi-applicant: skip parts[0] (header before first marker)
+        # For single-applicant: our fix puts data in parts[0], return it
+        if len(parts) == 1:
+            return [p.strip() for p in parts if p.strip()]
         return [p.strip() for p in parts[1:] if p.strip()]
 
     # ── Personal info ─────────────────────────────────────────────────────────
@@ -176,6 +180,45 @@ class CBCParser:
         writeoff = []
         guaranteed_active  = []
         guaranteed_closed  = []
+
+        # Try summary table format first (DD/MM/YYYY LENDER Type REF LoanType CCY Amt Role)
+        loan_re = re.compile(
+            r"(\d{2}/\d{2}/\d{4})\s+([A-Z][A-Z\s&.\'\-]+?)\s+"
+            r"(New|Review|Restructure|Settled|Write Off)\s+"
+            r"(Single|Joint|as Single|as Joint)\s+(\S+)\s+"
+            r"([\w\s]+?)\s+(USD|KHR)\s*([\d,\.]*)"
+            r"\s*(Primary|Guarantor|Co-Borrower|Co-borrower)?",
+            re.IGNORECASE
+        )
+        summary_matches = list(loan_re.finditer(text))
+        if summary_matches:
+            for m in summary_matches:
+                role    = (m.group(9) or "Primary").strip()
+                amt_str = m.group(8).replace(",","").strip()
+                amt     = float(amt_str) if amt_str else 0.0
+                loan = {
+                    "date":         m.group(1),
+                    "lender":       m.group(2).strip(),
+                    "enquiry_type": m.group(3).strip(),
+                    "account_type": m.group(4).strip(),
+                    "reference":    m.group(5).strip(),
+                    "loan_type":    m.group(6).strip(),
+                    "currency":     m.group(7).strip(),
+                    "loan_amount":  amt,
+                    "role":         role,
+                    "status":       "Normal",
+                }
+                if role.lower() in ("guarantor","co-borrower","co borrower"):
+                    guaranteed_active.append(loan)
+                else:
+                    active.append(loan)
+            return {
+                "accounts":          active,
+                "closed_accounts":   closed,
+                "writeoff_accounts": writeoff,
+                "guaranteed_active": guaranteed_active,
+                "guaranteed_closed": guaranteed_closed,
+            }
 
         # Find all "Creditor ..." blocks
         block_starts = [m.start() for m in re.finditer(r"\nCreditor\s+", text)]
