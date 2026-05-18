@@ -154,7 +154,7 @@ HTML_SHELL = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>CBC Credit Analysis — {title}</title>
+  <title>Credit Assessment Portal - {title}</title>
   <style>{css}</style>
 </head>
 <body>
@@ -162,13 +162,14 @@ HTML_SHELL = """<!DOCTYPE html>
     <div class="brand">
       <div class="brand-icon">CBC</div>
       <div>
-        <div class="brand-title">CBC Credit Analysis</div>
-        <div class="brand-sub">Cambodia Credit Bureau — PDF to Excel</div>
+        <div class="brand-title">Credit Assessment Portal</div>
+        <div class="brand-sub">CBC Credit Bureau Analyser</div>
       </div>
     </div>
     <div class="nav-links">
       <a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>
       <a href="/cbc/" class="nav-link">&#x1F4CA; CBC</a>
+      <a href="/cbc/jobs" class="nav-link">&#x1F4CB; My Jobs</a>
       <a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>
     </div>
   </div>
@@ -987,6 +988,105 @@ def pdf_summary(uid: str):
     return StreamingResponse(buf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="CBC_Summary_{uid}.pdf"'})
+
+
+
+@app.get("/jobs", response_class=HTMLResponse)
+def jobs_history(request: Request):
+    """CBC jobs history page."""
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    current_user = _get_username(request)
+    current_role = _get_role(request)
+
+    all_jobs = sorted(UPLOAD_DIR.glob("*_job.json"),
+                      key=lambda f: f.stat().st_mtime, reverse=True)
+
+    if current_role != "admin":
+        jobs = []
+        for jf in all_jobs:
+            try:
+                j = json.loads(jf.read_text())
+                if j.get("username","unknown") == current_user:
+                    jobs.append(jf)
+            except: pass
+    else:
+        jobs = all_jobs
+
+    rows = ""
+    counts = {"done":0,"error":0,"processing":0}
+    import datetime
+
+    for jf in jobs[:100]:
+        uid = jf.stem.replace("_job","")
+        try:
+            job      = json.loads(jf.read_text())
+            done     = (UPLOAD_DIR/(uid+"_result.json")).exists()
+            err_file = UPLOAD_DIR/(uid+"_error.txt")
+
+            if done:   status="done";   counts["done"]+=1;   badge='<span style="color:#059669;font-weight:600">&#x2713; Done</span>'
+            elif err_file.exists(): status="error"; counts["error"]+=1; badge='<span style="color:#dc2626;font-weight:600">&#x2717; Error</span>'
+            else:      status="processing"; counts["processing"]+=1; badge='<span style="color:#d97706;font-weight:600">&#x23F3; Processing</span>'
+
+            summary = ""
+            if done:
+                try:
+                    r = json.loads((UPLOAD_DIR/(uid+"_result.json")).read_text())
+                    apps = r.get("applicants",[])
+                    summary = f"{len(apps)} applicant(s)"
+                    if apps:
+                        p = apps[0].get("personal",{})
+                        summary += f" | {p.get('full_name_en',p.get('name_en_family',''))}"
+                except: pass
+            elif err_file.exists():
+                summary = f'<span style="color:#dc2626;font-size:11px">{err_file.read_text()[:60]}</span>'
+
+            mtime = datetime.datetime.fromtimestamp(jf.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            user_col = f"<td style='font-size:11px;color:#64748b'>{job.get('username','?')}</td>" if current_role=="admin" else ""
+
+            rows += f"""<tr>
+              <td style="font-size:11px;color:#94a3b8;white-space:nowrap">{mtime}</td>
+              {user_col}
+              <td style="font-size:12px">{job.get('filename','?')}</td>
+              <td>{badge}</td>
+              <td style="font-size:11px">{summary}</td>
+              <td style="white-space:nowrap">
+                {"<a href='/cbc/result/"+uid+"' style='font-size:12px;color:#2563eb;margin-right:8px'>View</a>" if done else ""}
+                {"<a href='/cbc/download/"+uid+"' style='font-size:12px;color:#059669'>Excel</a>" if done else ""}
+              </td>
+            </tr>"""
+        except Exception as e:
+            rows += f"<tr><td colspan='5' style='color:#dc2626;font-size:11px'>{uid}: {e}</td></tr>"
+
+    user_hdr = "<th style='padding:10px;color:#1a5276'>User</th>" if current_role=="admin" else ""
+    body = f"""
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <div>
+        <h1 style="font-size:20px;font-weight:700">CBC Jobs History</h1>
+        <p style="font-size:13px;color:#64748b;margin-top:3px">
+          <span style="color:#059669">&#x2713; {counts['done']} done</span> &nbsp;|&nbsp;
+          <span style="color:#dc2626">&#x2717; {counts['error']} failed</span>
+        </p>
+      </div>
+      <a href="/cbc/" class="btn btn-primary">+ New Upload</a>
+    </div>
+    <div class="card">
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:#d6eaf8">
+            <th style="padding:10px;text-align:left;color:#1a5276">Time</th>
+            {user_hdr}
+            <th style="padding:10px;text-align:left;color:#1a5276">File</th>
+            <th style="padding:10px;color:#1a5276">Status</th>
+            <th style="padding:10px;text-align:left;color:#1a5276">Summary</th>
+            <th style="padding:10px;color:#1a5276">Actions</th>
+          </tr></thead>
+          <tbody>
+            {rows if rows else "<tr><td colspan='5' style='text-align:center;padding:30px;color:#94a3b8'>No jobs yet</td></tr>"}
+          </tbody>
+        </table>
+      </div>
+    </div>"""
+    return HTMLResponse(_shell("Jobs History", body))
 
 
 @app.get("/health")

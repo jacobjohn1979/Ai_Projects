@@ -102,19 +102,19 @@ def page(title, body):
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>COHO - {title}</title>
+<title>Credit Assessment Portal - {title}</title>
 <style>{CSS}</style></head>
 <body>
 <div class="topbar">
   <div class="brand">
     <div class="brand-icon">COHO</div>
-    <div><div class="brand-title">Conduct of Account Analyser</div>
-         <div class="brand-sub">Bank Statement PDF to Excel</div></div>
+    <div><div class="brand-title">Credit Assessment Portal</div>
+         <div class="brand-sub">COHO Bank Statement Analyser</div></div>
   </div>
   <div class="nav-links">
     <a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>
     <a href="/cbc/" class="nav-link">&#x1F4CA; CBC</a>
-    <a href="/coho/jobs" class="nav-link">&#x1F4CB; Jobs</a>
+    <a href="/coho/jobs" class="nav-link">&#x1F4CB; My Jobs</a>
     <a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>
   </div>
 </div>
@@ -191,8 +191,37 @@ def home():
     return HTMLResponse(page("Upload", body))
 
 
+
+def _get_username(request: Request) -> str:
+    """Get username from JWT cookie."""
+    try:
+        import jwt as _jwt
+        import os as _os
+        token = request.cookies.get("auth_token","")
+        if not token:
+            return "unknown"
+        secret = _os.getenv("JWT_SECRET","")
+        payload = _jwt.decode(token, secret, algorithms=["HS256"])
+        return payload.get("sub","unknown")
+    except:
+        return "unknown"
+
+def _get_role(request: Request) -> str:
+    """Get role from JWT cookie."""
+    try:
+        import jwt as _jwt
+        import os as _os
+        token = request.cookies.get("auth_token","")
+        if not token:
+            return "staff"
+        secret = _os.getenv("JWT_SECRET","")
+        payload = _jwt.decode(token, secret, algorithms=["HS256"])
+        return payload.get("role","staff")
+    except:
+        return "staff"
+
 @app.post("/extract")
-async def extract(pdf_file: UploadFile = File(...)):
+async def extract(request: Request, pdf_file: UploadFile = File(...)):
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     uid      = str(uuid.uuid4())[:8]
     pdf_path = UPLOAD_DIR / (uid + "_" + pdf_file.filename)
@@ -202,6 +231,7 @@ async def extract(pdf_file: UploadFile = File(...)):
         "uid": uid, "filename": pdf_file.filename,
         "pdf_path": str(pdf_path),
         "size_mb": round(len(raw) / 1024 / 1024, 2),
+        "username": _get_username(request),
     }))
     return JSONResponse({"uid": uid})
 
@@ -480,8 +510,20 @@ def download(uid: str):
 def debug_jobs():
     """Show all jobs with their status - for debugging failed extractions."""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    current_user = _get_username(request)
+    current_role = _get_role(request)
     jobs = sorted(UPLOAD_DIR.glob("*_job.json"),
                   key=lambda f: f.stat().st_mtime, reverse=True)
+    # Filter by user unless admin
+    if current_role != "admin":
+        filtered = []
+        for jf in jobs:
+            try:
+                j = json.loads(jf.read_text())
+                if j.get("username","unknown") == current_user:
+                    filtered.append(jf)
+            except: pass
+        jobs = filtered
 
     rows = ""
     for jf in jobs[:50]:
@@ -715,11 +757,23 @@ def pdf_summary(uid: str):
 
 
 @app.get("/jobs", response_class=HTMLResponse)
-def jobs_history():
+def jobs_history(request: Request):
     """Show all completed and failed jobs with links to results."""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    current_user = _get_username(request)
+    current_role = _get_role(request)
     jobs = sorted(UPLOAD_DIR.glob("*_job.json"),
                   key=lambda f: f.stat().st_mtime, reverse=True)
+    # Filter by user unless admin
+    if current_role != "admin":
+        filtered = []
+        for jf in jobs:
+            try:
+                j = json.loads(jf.read_text())
+                if j.get("username","unknown") == current_user:
+                    filtered.append(jf)
+            except: pass
+        jobs = filtered
 
     rows = ""
     counts = {"done": 0, "error": 0, "processing": 0}
@@ -765,6 +819,7 @@ def jobs_history():
 
             rows += f"""<tr>
               <td style="font-size:11px;color:#94a3b8;white-space:nowrap">{mtime}</td>
+              {"<td style='font-size:11px;color:#64748b'>" + job.get('username','?') + "</td>" if current_role == "admin" else ""}
               <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                   title="{job.get('filename','?')}">{job.get('filename','?')}</td>
               <td style="font-size:11px">{job.get('size_mb',0)} MB</td>
@@ -802,6 +857,7 @@ def jobs_history():
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="background:#D6E4F0">
             <th style="padding:10px;text-align:left;color:#1F4E79">Time</th>
+            {"<th style='padding:10px;text-align:left;color:#1F4E79'>User</th>" if current_role == "admin" else ""}
             <th style="padding:10px;text-align:left;color:#1F4E79">File</th>
             <th style="padding:10px;color:#1F4E79">Size</th>
             <th style="padding:10px;color:#1F4E79">Status</th>
