@@ -655,6 +655,15 @@ def fill_excel_template(data: dict, output_path: str,
         sheet_name = sheet_name[:31]
         _fill_applicant_sheet(wb, app, header, sheet_name)
 
+    # Ensure at least one sheet is visible
+    visible_found = False
+    for ws in wb.worksheets:
+        if ws.sheet_state != 'hidden':
+            visible_found = True
+            break
+    if not visible_found:
+        wb.worksheets[0].sheet_state = 'visible'
+        wb.active = wb.worksheets[0]
     wb.save(output_path)
     return output_path
 
