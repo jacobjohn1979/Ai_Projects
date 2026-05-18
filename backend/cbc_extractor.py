@@ -664,6 +664,11 @@ def fill_excel_template(data: dict, output_path: str,
     if not visible_found:
         wb.worksheets[0].sheet_state = 'visible'
         wb.active = wb.worksheets[0]
+    # Ensure at least one sheet is visible before saving
+    has_visible = any(ws.sheet_state != 'hidden' for ws in wb.worksheets)
+    if not has_visible and wb.worksheets:
+        wb.worksheets[0].sheet_state = 'visible'
+        wb.active = wb.worksheets[0]
     wb.save(output_path)
     return output_path
 
