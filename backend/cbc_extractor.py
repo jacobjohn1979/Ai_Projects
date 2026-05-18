@@ -181,7 +181,13 @@ class CBCParser:
         guaranteed_active  = []
         guaranteed_closed  = []
 
-        # Try summary table format first (DD/MM/YYYY LENDER Type REF LoanType CCY Amt Role)
+        # Only use summary table parser when no Creditor blocks exist
+        if re.search(r"\nCreditor\s+", text):
+            # Has creditor blocks - skip summary parser, use block parser below
+            summary_matches = []
+        else:
+            # No creditor blocks - use summary table format
+            summary_matches = []  # will be filled below
         loan_re = re.compile(
             r"(\d{2}/\d{2}/\d{4})\s+([A-Z][A-Z\s&.\'\-]+?)\s+"
             r"(New|Review|Restructure|Settled|Write Off)\s+"
@@ -190,7 +196,8 @@ class CBCParser:
             r"\s*(Primary|Guarantor|Co-Borrower|Co-borrower)?",
             re.IGNORECASE
         )
-        summary_matches = list(loan_re.finditer(text))
+        has_creditor = bool(re.search(r"\nCreditor\s+", text))
+        summary_matches = [] if has_creditor else list(loan_re.finditer(text))
         if summary_matches:
             for m in summary_matches:
                 role    = (m.group(9) or "Primary").strip()
