@@ -87,14 +87,18 @@ class CBCParser:
     def _split_applicants(self) -> list[str]:
         """Split full text into per-applicant sections."""
         parts = re.split(r"Applicant \d+ of \d+", self.full_text)
-        # Single applicant report - no "Applicant X of Y" marker
+        # If no split occurred, check if it's a single-applicant report
+        # (no "Applicant X of Y" marker) — use text after header
         if len(parts) == 1:
+            # Single applicant — skip the header section
+            # Header ends around "Data Provided vs" or "Applicant Type"
             m = re.search(r"(Data Provided vs|Applicant Type\s+\w+)", self.full_text)
             if m:
                 parts = [self.full_text[m.start():]]
             else:
                 parts = [self.full_text]
-        # Single applicant: return parts[0]; multi: skip parts[0] (header)
+        # For multi-applicant: skip parts[0] (header before first marker)
+        # For single-applicant: our fix puts data in parts[0], return it
         if len(parts) == 1:
             return [p.strip() for p in parts if p.strip()]
         return [p.strip() for p in parts[1:] if p.strip()]
@@ -177,47 +181,51 @@ class CBCParser:
         guaranteed_active  = []
         guaranteed_closed  = []
 
-        # Try summary table format ONLY when no Creditor blocks exist
-        # Format: DD/MM/YYYY LENDER Type Single/Joint REF LoanType CCY Amount Role
+        # Only use summary table parser when no Creditor blocks exist
+        if re.search(r"\nCreditor\s+", text):
+            # Has creditor blocks - skip summary parser, use block parser below
+            summary_matches = []
+        else:
+            # No creditor blocks - use summary table format
+            summary_matches = []  # will be filled below
+        loan_re = re.compile(
+            r"(\d{2}/\d{2}/\d{4})\s+([A-Z][A-Z\s&.\'\-]+?)\s+"
+            r"(New|Review|Restructure|Settled|Write Off)\s+"
+            r"(Single|Joint|as Single|as Joint)\s+(\S+)\s+"
+            r"([\w\s]+?)\s+(USD|KHR)\s*([\d,\.]*)"
+            r"\s*(Primary|Guarantor|Co-Borrower|Co-borrower)?",
+            re.IGNORECASE
+        )
         has_creditor = bool(re.search(r"\nCreditor\s+", text))
-        if not has_creditor:
-            loan_re = re.compile(
-                r"(\d{2}/\d{2}/\d{4})\s+([A-Z][A-Z\s&.\'\-]+?)\s+"
-                r"(New|Review|Restructure|Settled|Write Off)\s+"
-                r"(Single|Joint|as Single|as Joint)\s+(\S+)\s+"
-                r"([\w\s]+?)\s+(USD|KHR)\s*([\d,\.]*)"
-                r"\s*(Primary|Guarantor|Co-Borrower|Co-borrower)?",
-                re.IGNORECASE
-            )
-            summary_matches = list(loan_re.finditer(text))
-            if summary_matches:
-                for m in summary_matches:
-                    role    = (m.group(9) or "Primary").strip()
-                    amt_str = m.group(8).replace(",","").strip()
-                    amt     = float(amt_str) if amt_str else 0.0
-                    loan = {
-                        "date":         m.group(1),
-                        "lender":       m.group(2).strip(),
-                        "enquiry_type": m.group(3).strip(),
-                        "account_type": m.group(4).strip(),
-                        "reference":    m.group(5).strip(),
-                        "loan_type":    m.group(6).strip(),
-                        "currency":     m.group(7).strip(),
-                        "loan_amount":  amt,
-                        "role":         role,
-                        "status":       "Normal",
-                    }
-                    if role.lower() in ("guarantor","co-borrower","co borrower"):
-                        guaranteed_active.append(loan)
-                    else:
-                        active.append(loan)
-                return {
-                    "accounts":          active,
-                    "closed_accounts":   closed,
-                    "writeoff_accounts": writeoff,
-                    "guaranteed_active": guaranteed_active,
-                    "guaranteed_closed": guaranteed_closed,
+        summary_matches = [] if has_creditor else list(loan_re.finditer(text))
+        if summary_matches:
+            for m in summary_matches:
+                role    = (m.group(9) or "Primary").strip()
+                amt_str = m.group(8).replace(",","").strip()
+                amt     = float(amt_str) if amt_str else 0.0
+                loan = {
+                    "date":         m.group(1),
+                    "lender":       m.group(2).strip(),
+                    "enquiry_type": m.group(3).strip(),
+                    "account_type": m.group(4).strip(),
+                    "reference":    m.group(5).strip(),
+                    "loan_type":    m.group(6).strip(),
+                    "currency":     m.group(7).strip(),
+                    "loan_amount":  amt,
+                    "role":         role,
+                    "status":       "Normal",
                 }
+                if role.lower() in ("guarantor","co-borrower","co borrower"):
+                    guaranteed_active.append(loan)
+                else:
+                    active.append(loan)
+            return {
+                "accounts":          active,
+                "closed_accounts":   closed,
+                "writeoff_accounts": writeoff,
+                "guaranteed_active": guaranteed_active,
+                "guaranteed_closed": guaranteed_closed,
+            }
 
         # Find all "Creditor ..." blocks
         block_starts = [m.start() for m in re.finditer(r"\nCreditor\s+", text)]
@@ -684,7 +692,7 @@ def fill_excel_template(data: dict, output_path: str,
     """
     if template_path and Path(template_path).exists():
         wb = openpyxl.load_workbook(template_path)
-        # Clear sheets but keep at least one visible
+        # Clear data but keep at least one sheet visible
         for sname in list(wb.sheetnames)[1:]:
             del wb[sname]
         if wb.worksheets:
@@ -709,8 +717,22 @@ def fill_excel_template(data: dict, output_path: str,
         _fill_applicant_sheet(wb, app, header, sheet_name)
 
     # Ensure at least one sheet is visible
+    visible_found = False
+    for ws in wb.worksheets:
+        if ws.sheet_state != 'hidden':
+            visible_found = True
+            break
+    if not visible_found:
+        wb.worksheets[0].sheet_state = 'visible'
+        wb.active = wb.worksheets[0]
+    # Ensure at least one sheet is visible before saving
+    has_visible = any(ws.sheet_state != 'hidden' for ws in wb.worksheets)
+    if not has_visible and wb.worksheets:
+        wb.worksheets[0].sheet_state = 'visible'
+        wb.active = wb.worksheets[0]
+    # Ensure at least one sheet is visible before saving
     if not wb.worksheets:
-        ws_new = wb.create_sheet("Summary")
+        wb.create_sheet("Summary")
     has_visible = any(ws.sheet_state != 'hidden' for ws in wb.worksheets)
     if not has_visible:
         wb.worksheets[0].sheet_state = 'visible'
@@ -720,6 +742,12 @@ def fill_excel_template(data: dict, output_path: str,
             if ws.sheet_state != 'hidden':
                 wb.active = ws
                 break
+    # Ensure at least one sheet visible
+    if not wb.worksheets:
+        wb.create_sheet("Summary")
+    if not any(ws.sheet_state != 'hidden' for ws in wb.worksheets):
+        wb.worksheets[0].sheet_state = 'visible'
+        wb.active = wb.worksheets[0]
     wb.save(output_path)
     return output_path
 
