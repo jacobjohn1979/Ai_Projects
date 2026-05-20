@@ -1,5 +1,5 @@
 """
-coho_portal.py — Conduct of Account Bank Statement Portal
+coho_portal.py — Credit Assessment Tools — COHO
 Upload PDF → extract transactions → download COHO Excel template
 Port: 8008  Access: /coho/
 """
@@ -7,7 +7,7 @@ import os, io, json, uuid, logging, threading
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile, Request
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 
@@ -109,7 +109,7 @@ def page(title, body):
   <div class="brand">
     <div class="brand-icon">COHO</div>
     <div><div class="brand-title">Credit Assessment Portal</div>
-         <div class="brand-sub">COHO Bank Statement Analyser</div></div>
+         <div class="brand-sub">COHO — Bank Statement Analyser</div></div>
   </div>
   <div class="nav-links">
     <a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>
@@ -121,7 +121,7 @@ def page(title, body):
 <div class="content">
 <div class="print-header" style="text-align:center;padding:10px 0 20px;border-bottom:2px solid #1F4E79;margin-bottom:20px">
   <div style="font-size:18px;font-weight:700;color:#1F4E79">Conduct of Account (COHO) Summary</div>
-  <div style="font-size:12px;color:#64748b;margin-top:4px">Banking KYC Fraud Detection System</div>
+  <div style="font-size:12px;color:#64748b;margin-top:4px">Credit Assessment Tools</div>
 </div>
 {body}</div>
 </body></html>"""
@@ -132,7 +132,7 @@ def home():
     body = """
     <h1 style="font-size:20px;font-weight:700;margin-bottom:20px">Bank Statement Analyser</h1>
     <div class="card">
-      <div class="card-title">Upload Bank Statement PDF</div>
+      <div class="card-title">Upload COHO — Bank Statement Analyser</div>
       <div class="upload-zone" id="zone" onclick="document.getElementById('inp').click()">
         <div style="font-size:32px;margin-bottom:10px">&#128196;</div>
         <div style="font-size:16px;font-weight:600;margin-bottom:6px">Drop PDF here or click to browse</div>
@@ -640,7 +640,7 @@ def pdf_summary(uid: str):
 
     period = str(header.get("period_from",""))[:10] + " to " + str(header.get("period_to",""))[:10]
 
-    story.append(Paragraph("CONDUCT OF ACCOUNT (COHO) SUMMARY", title_style))
+    story.append(Paragraph("CREDIT ASSESSMENT TOOLS — COHO SUMMARY", title_style))
     story.append(Paragraph(f"Period: {period}", sub_style))
     story.append(Spacer(1, 0.3*cm))
 
@@ -743,7 +743,7 @@ def pdf_summary(uid: str):
     # Footer
     from datetime import datetime
     story.append(Paragraph(
-        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Banking KYC Fraud Detection System",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Credit Assessment Tools",
         ParagraphStyle("footer", fontSize=7, textColor=colors.grey, alignment=TA_CENTER)
     ))
 

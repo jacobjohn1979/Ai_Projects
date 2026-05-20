@@ -181,14 +181,14 @@ def login_page(error="", redirect=""):
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>KYC System — Login</title>
+<title>Credit Assessment Tools — Login</title>
 <style>{CSS}</style></head>
 <body>
 <div class="login-box">
   <div class="logo">
     <div class="logo-icon">KYC</div>
-    <div class="logo-title">Banking KYC System</div>
-    <div class="logo-sub">Fraud Detection &amp; Analysis Platform</div>
+    <div class="logo-title">Credit Assessment Tools</div>
+    <div class="logo-sub">Bank Statement &amp; Credit Analysis</div>
   </div>
   {"<div class='alert alert-err'>" + error + "</div>" if error else ""}
   <form method="POST" action="/auth/login">
@@ -203,23 +203,18 @@ def login_page(error="", redirect=""):
     </div>
     <button type="submit" class="btn">Sign In</button>
   </form>
-  <div class="footer">Banking KYC &amp; Fraud Detection System</div>
+  <div class="footer">Credit Assessment Tools</div>
 </div>
 </body></html>"""
 
 # ── LOGIN ─────────────────────────────────────────────────────────────────────
 
 @app.get("/login", response_class=HTMLResponse)
-def get_login(request: Request, redirect: str = ""):
-    # Already logged in with valid token?
+def get_login(request: Request, redirect: str = "/"):
+    # Already logged in?
     token = _get_token_from_request(request)
-    if token:
-        payload = _verify_token(token)
-        if payload:
-            role    = payload.get("role","")
-            allowed = ROLE_ACCESS.get(role,[])
-            dest    = redirect if redirect and not redirect.startswith("/auth") else (allowed[0] if allowed else "/")
-            return RedirectResponse(dest, status_code=302)
+    if token and _verify_token(token):
+        return RedirectResponse(redirect or "/", status_code=302)
     return HTMLResponse(login_page(redirect=redirect))
 
 @app.post("/login")
@@ -301,23 +296,34 @@ def logout(request: Request):
 # ── TOKEN VALIDATION (called by other portals) ────────────────────────────────
 
 @app.get("/validate")
-def validate(request: Request, path: str = ""):
-    """Called by nginx auth_request to validate token."""
+def validate(request: Request, path: str = "/"):
+    """
+    Called by nginx auth_request to validate token.
+    Returns 200 with user info headers if valid, 401 if not.
+    """
     token = _get_token_from_request(request)
     if not token:
         return JSONResponse({"error": "no token"}, status_code=401)
+
     payload = _verify_token(token)
     if not payload:
         return JSONResponse({"error": "invalid token"}, status_code=401)
-    role = payload.get("role", "")
-    if role == "admin":
-        return JSONResponse({"username": payload.get("sub"), "role": role})
-    check_path = path or request.headers.get("X-Original-URI", "/")
-    allowed = ROLE_ACCESS.get(role, [])
-    if not any(check_path.startswith(p) for p in allowed):
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    return JSONResponse({"username": payload.get("sub"), "role": role})
 
+    role    = payload.get("role","")
+    allowed = ROLE_ACCESS.get(role, [])
+
+    # Check if this role can access the requested path
+    path_allowed = any(path.startswith(p) for p in allowed)
+    if not path_allowed:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    return JSONResponse({
+        "username": payload.get("sub"),
+        "role":     role,
+        "exp":      payload.get("exp"),
+    })
+
+# ── API: CHECK (for portals to call internally) ───────────────────────────────
 
 @app.get("/check")
 def check_auth(request: Request):

@@ -1,5 +1,5 @@
 """
-cbc_portal.py — CBC Credit Analysis Portal
+cbc_portal.py — Credit Assessment Tools — CBC
 Web interface for uploading CBC PDFs, extracting data,
 previewing results, and downloading the filled Excel template.
 
@@ -26,7 +26,7 @@ log = logging.getLogger("cbc_portal")
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads")) / "cbc"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="CBC Credit Analysis Portal", version="1.0.0")
+app = FastAPI(title="Credit Assessment Tools — CBC", version="1.0.0")
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 CSS = """
@@ -163,7 +163,7 @@ HTML_SHELL = """<!DOCTYPE html>
       <div class="brand-icon">CBC</div>
       <div>
         <div class="brand-title">Credit Assessment Portal</div>
-        <div class="brand-sub">CBC Credit Bureau Analyser</div>
+        <div class="brand-sub">CBC — Credit Bureau Analyser</div>
       </div>
     </div>
     <div class="nav-links">
@@ -176,7 +176,7 @@ HTML_SHELL = """<!DOCTYPE html>
   <div class="content">
     <div class="print-header" style="text-align:center;padding:10px 0 20px;border-bottom:2px solid #1a5276;margin-bottom:20px">
       <div style="font-size:18px;font-weight:700;color:#1a5276">CBC Credit Bureau Report Summary</div>
-      <div style="font-size:12px;color:#64748b;margin-top:4px">Banking KYC Fraud Detection System</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">Credit Assessment Tools</div>
     </div>
     {body}
   </div>
@@ -816,7 +816,7 @@ def _build_applicant_panel(app: dict, idx: int, active_cls: str) -> str:
             <tr><td style="color:var(--muted);padding:3px 0;width:40%">Full Name</td>
                 <td><strong>{p.get("full_name_en","—")}</strong></td></tr>
             <tr><td style="color:var(--muted);padding:3px 0">ID Number</td>
-                <td>{p.get("id_number","—")} ({(p.get("id_type","").split() or [""])[0]})</td></tr>
+                <td>{p.get("id_number","—")} ({p.get("id_type","").split()[0]})</td></tr>
             <tr><td style="color:var(--muted);padding:3px 0">Date of Birth</td>
                 <td>{p.get("dob","—")}</td></tr>
             <tr><td style="color:var(--muted);padding:3px 0">Gender</td>
@@ -926,7 +926,7 @@ def pdf_summary(uid: str):
                               alignment=TA_CENTER, spaceAfter=12)
 
     subject = data.get("subject", {})
-    story.append(Paragraph("CBC CREDIT BUREAU REPORT SUMMARY", title_s))
+    story.append(Paragraph("CREDIT ASSESSMENT TOOLS — CBC SUMMARY", title_s))
     story.append(Paragraph(f"Generated: {data.get('extracted_at','')[:10]}", sub_s))
     story.append(Spacer(1, 0.3*cm))
 
@@ -979,7 +979,7 @@ def pdf_summary(uid: str):
     from datetime import datetime
     story.append(Spacer(1, 0.4*cm))
     story.append(Paragraph(
-        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Banking KYC Fraud Detection System",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Credit Assessment Tools",
         ParagraphStyle("footer", fontSize=7, textColor=colors.grey, alignment=TA_CENTER)
     ))
 
