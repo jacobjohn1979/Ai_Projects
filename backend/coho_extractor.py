@@ -123,6 +123,8 @@ class BankStatementParser:
         if "PPCBKHPP"    in p:                                         return "PRINCE"
         if "FOR POSTING PERIOD" in p:                                  return "AMK"
         if "TACBKHPP" in p:                                            return "TAIWAN"
+        if "LOLC" in p and "lolc.com" in self.full_text.lower():      return "LOLC"
+        if "LOLC (CAMBODIA)" in p:                                    return "LOLC"
         if "VATTANAC"    in p:                                         return "VATTANAC"
 
         # Name-based (after SWIFT to avoid false matches)
@@ -280,6 +282,22 @@ class BankStatementParser:
                 h["period_to"]   = self._parse_date_dmy(m.group(2))
             m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
             h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+
+        elif bank == "LOLC":
+            h["bank"]     = "LOLC (Cambodia)"
+            h["currency"] = "USD"
+            m = re.search(r"Account Name\s*:(.+)", p)
+            h["holder_name"] = m.group(1).strip()[:50] if m else ""
+            m = re.search(r"Account Number\s*:([\d]+)", p)
+            h["account_no"] = m.group(1).strip() if m else ""
+            m = re.search(r"Statement of Account From\s+([\d\-]+)\s+to\s+([\d\-]+)", p, re.IGNORECASE)
+            if m:
+                h["period_from"] = self._parse_date_wing(m.group(1).strip())
+                h["period_to"]   = self._parse_date_wing(m.group(2).strip())
+            m = re.search(r"Start Balance\s+USD\s+([\d,\.]+)", p)
+            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+            m = re.search(r"End Balance\s+USD\s+([\d,\.]+)", p)
+            h["ending_balance"] = float(m.group(1).replace(",","")) if m else 0.0
 
         elif bank == "TAIWAN":
             h["bank"]     = "Taiwan Cooperative Bank"
@@ -490,6 +508,7 @@ class BankStatementParser:
         elif bank == "AMRET":   return self._parse_amret()
         elif bank == "AMK":     return self._parse_amk()
         elif bank == "TAIWAN":  return self._parse_taiwan()
+        elif bank == "LOLC":    return self._parse_lolc()
         elif bank == "KBPRASAC": return self._parse_kbprasac()
         elif bank == "HATTHA":  return self._parse_hattha()
         elif bank == "CANADIA": return self._parse_canadia()
@@ -848,64 +867,91 @@ class BankStatementParser:
 
     def _parse_sathapana(self) -> list[dict]:
         """
-        Sathapana Bank — same Money In / Money Out format as ABA.
+        Sathapana Bank — two formats:
+
+        Format A (with balance):
           Oct 01, 2025 19:49 046OART252740504 Own Account Transfer to 0.07 USD
-        Uses ABA-style parsing (Mon DD, YYYY) with USD amounts.
+          Date Reference No Transaction Detail Money In Money Out Balance
+
+        Format B (no balance column):
+          Aug 14, 2024 070WSFT242270008 Received fund from WING BANK 369.69 USD
+          16:46 (CAMBODIA) PLC
+          Aug 14, 2024 070ZTRF2422700E1 Loan Principal Repayment 134.71 USD
+          22:58 0701001192910001
         """
         transactions = []
         DATE_RE = re.compile(r"^([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})\s+(.*)")
         AMT_RE  = re.compile(r"([\d,]+\.?\d*)\s+USD")
+        SKIP    = {"beginning balance","ending balance","date reference",
+                   "money in","money out","account statement","account type",
+                   "period from","account number","generate date","balance"}
+
+        # Detect format: Format B has no Balance column header
+        has_balance_col = "BALANCE" in self.full_text.upper()[:3000] and \
+                          "BEGINNING BALANCE" in self.full_text.upper()
 
         for page_text in self.pages:
-            for line in page_text.split("\n"):
-                line = line.strip()
-                m    = DATE_RE.match(line)
-                if not m:
-                    continue
-                rest = m.group(2).strip()
-                if any(x in rest for x in ["Beginning Balance","Ending Balance","Date Reference"]):
-                    continue
-                trx_date = self._parse_date(m.group(1))
-                if not trx_date:
-                    continue
+            lines = [l.strip() for l in page_text.split("\n")]
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if any(s in line.lower() for s in SKIP):
+                    i += 1; continue
 
-                amt_matches = [(m2.start(), float(m2.group(1).replace(",","")))
-                               for m2 in AMT_RE.finditer(rest)]
-                if len(amt_matches) < 1:
-                    continue
+                m = DATE_RE.match(line)
+                if m:
+                    trx_date = self._parse_date(m.group(1))
+                    rest     = m.group(2).strip()
+                    i += 1
 
-                balance  = amt_matches[-1][1]
-                # Second to last = transaction amount if 2+ amounts
-                if len(amt_matches) >= 2:
-                    amount   = amt_matches[-2][1]
-                    # Direction: Money Out col before Money In col
-                    # Check keywords for direction
-                    rl       = rest.lower()
+                    # Collect continuation lines (time, ref, desc continuation)
+                    while i < len(lines) and not DATE_RE.match(lines[i]):
+                        nl = lines[i].strip()
+                        if any(s in nl.lower() for s in SKIP): break
+                        if not nl: break
+                        rest += " " + nl
+                        i += 1
+
+                    if not trx_date: continue
+
+                    amt_matches = [(m2.start(), float(m2.group(1).replace(",","")))
+                                   for m2 in AMT_RE.finditer(rest)]
+                    if not amt_matches: continue
+
+                    rl = rest.lower()
                     is_debit = any(x in rl for x in [
                         "pay khqr","topup","mobile topup","fee","transfer to",
-                        "own account transfer to","withdrawal","debit","pay to"
+                        "own account transfer to","withdrawal","debit","pay to",
+                        "loan principal","loan interest","repayment","quarterly fee"
                     ])
                     is_credit = any(x in rl for x in [
-                        "transfer from","received","own account transfer from","deposit","credit"
+                        "transfer from","received","own account transfer from",
+                        "deposit","credit","fund from","received fund"
                     ])
                     if not is_debit and not is_credit:
-                        is_debit = True  # default to debit for Sathapana unknown
-                    money_in  = 0.0 if is_debit else amount
-                    money_out = amount if is_debit else 0.0
+                        is_debit = True
+
+                    if has_balance_col and len(amt_matches) >= 2:
+                        # Format A: second-to-last=amount, last=balance
+                        balance = amt_matches[-1][1]
+                        amount  = amt_matches[-2][1]
+                    else:
+                        # Format B: only one amount, no balance col
+                        amount  = amt_matches[-1][1]
+                        balance = 0.0  # will be computed by _fix_balances
+
+                    desc = rest[:amt_matches[0][0]].strip()[:100]
+
+                    if amount > 0:
+                        transactions.append({
+                            "date":      trx_date,
+                            "desc":      desc,
+                            "money_in":  round(amount, 2) if is_credit else 0.0,
+                            "money_out": round(amount, 2) if is_debit  else 0.0,
+                            "balance":   round(balance, 2),
+                        })
                 else:
-                    # Only balance — skip
-                    continue
-
-                desc = rest[:amt_matches[0][0]].strip()[:100]
-
-                if amount > 0:
-                    transactions.append({
-                        "date":      trx_date,
-                        "desc":      desc,
-                        "money_in":  round(money_in, 2),
-                        "money_out": round(money_out, 2),
-                        "balance":   round(balance, 2),
-                    })
+                    i += 1
         return transactions
 
     def _parse_postbank(self) -> list[dict]:
@@ -1477,6 +1523,91 @@ class BankStatementParser:
                 else:
                     i += 1
         return transactions
+
+    def _parse_lolc(self) -> list[dict]:
+        """
+        LOLC Cambodia format:
+          Value Date  Description  Reference No  Money Out  Money In  Balance
+          20 Oct 2025 20 Oct 2025 Loan repayment 0.31 0.00
+          Bakong from          <- description continuation
+          20 Oct 2025 20 Oct 2025 520.00 520.00
+          SOPHEAP SAO          <- description on next line
+
+        Two date columns at start (transaction date + value date same)
+        Amounts: Money Out then Money In then Balance (last 3 numbers)
+        """
+        transactions = []
+        DATE_RE = re.compile(
+            r"^(\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4})\s+(\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4})\s+(.*)"
+        )
+        AMT_RE = re.compile(r"([\d,]+\.\d{2})")
+        SKIP   = {"value date","start balance","end balance","money in","money out",
+                  "total records","disclaimer","statement of account","account summary",
+                  "your account summary","interest earned","transaction","page"}
+
+        for page_text in self.pages:
+            lines = [l.strip() for l in page_text.split("\n")]
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if any(s in line.lower() for s in SKIP):
+                    i += 1; continue
+
+                m = DATE_RE.match(line)
+                if m:
+                    trx_date = self._parse_date_wing(m.group(1).replace(" ", "-"))
+                    rest     = m.group(3)
+                    i += 1
+
+                    # Collect continuation lines
+                    while i < len(lines) and not DATE_RE.match(lines[i]):
+                        nl = lines[i].strip()
+                        if any(s in nl.lower() for s in SKIP): break
+                        if not nl: break
+                        rest += " " + nl
+                        i += 1
+
+                    if not trx_date: continue
+
+                    amounts = [float(x.group(1).replace(",",""))
+                               for x in AMT_RE.finditer(rest)]
+                    if len(amounts) < 2: continue
+
+                    balance = amounts[-1]
+                    amount  = amounts[-2]
+
+                    # Clean description
+                    desc = AMT_RE.sub("", rest).strip()
+                    # Include continuation desc from next line if collected
+                    desc = re.sub(r"\s+", " ", desc).strip()[:100]
+
+                    # Direction: LOLC shows only one of Money Out / Money In
+                    rl = (desc + " " + line).lower()
+                    is_debit = any(x in rl for x in
+                        ["loan repayment","transfer out","fee","charge","debit","withdraw"])
+                    is_credit = any(x in rl for x in
+                        ["bakong from","transfer in","deposit","credit","interest","sopheap"])
+
+                    # Fallback: if two equal amounts = credit (deposit)
+                    if not is_debit and not is_credit:
+                        is_credit = len(amounts) == 2 and amounts[0] == amounts[1]
+                        is_debit  = not is_credit
+
+                    money_in  = round(amount, 2) if is_credit else 0.0
+                    money_out = round(amount, 2) if is_debit  else 0.0
+
+                    if money_in > 0 or money_out > 0:
+                        transactions.append({
+                            "date":      trx_date,
+                            "desc":      desc,
+                            "money_in":  round(money_in, 2),
+                            "money_out": round(money_out, 2),
+                            "balance":   round(balance, 2),
+                        })
+                else:
+                    i += 1
+        return transactions
+
 
     def _parse_taiwan(self) -> list[dict]:
         """
