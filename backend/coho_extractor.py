@@ -122,6 +122,7 @@ class BankStatementParser:
         if "MBBECAMM"    in p:                                         return "MAYBANK"
         if "PPCBKHPP"    in p:                                         return "PRINCE"
         if "FOR POSTING PERIOD" in p:                                  return "AMK"
+        if "TACBKHPP" in p:                                            return "TAIWAN"
         if "VATTANAC"    in p:                                         return "VATTANAC"
 
         # Name-based (after SWIFT to avoid false matches)
@@ -278,6 +279,23 @@ class BankStatementParser:
                 h["period_from"] = self._parse_date_dmy(m.group(1))
                 h["period_to"]   = self._parse_date_dmy(m.group(2))
             m = re.search(r"Opening Balance\s+([\d,\.]+)", p)
+            h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
+
+        elif bank == "TAIWAN":
+            h["bank"]     = "Taiwan Cooperative Bank"
+            h["currency"] = "USD"
+            m = re.search(r"Customer Name\s*:\s*(.+)", p)
+            h["holder_name"] = m.group(1).strip()[:50] if m else ""
+            m = re.search(r"A/C No\s*:\s*([\d\-]+)\s+Deposit Currency:\s*USD", p)
+            h["account_no"] = m.group(1).strip() if m else ""
+            m = re.search(r"STATEMENT PERIOD\s*:\s*([\d/]+)\s*~\s*([\d/]+)", p)
+            if m:
+                try:
+                    from datetime import datetime as dt2
+                    h["period_from"] = dt2.strptime(m.group(1).strip(), "%Y/%m/%d").date()
+                    h["period_to"]   = dt2.strptime(m.group(2).strip(), "%Y/%m/%d").date()
+                except: pass
+            m = re.search(r"Pre Balance\s+[\d:]+\s+([\d,\.]+)", p)
             h["opening_balance"] = float(m.group(1).replace(",","")) if m else 0.0
 
         elif bank == "AMK":
@@ -471,6 +489,7 @@ class BankStatementParser:
         elif bank == "PHILIP":  return self._parse_philip()
         elif bank == "AMRET":   return self._parse_amret()
         elif bank == "AMK":     return self._parse_amk()
+        elif bank == "TAIWAN":  return self._parse_taiwan()
         elif bank == "KBPRASAC": return self._parse_kbprasac()
         elif bank == "HATTHA":  return self._parse_hattha()
         elif bank == "CANADIA": return self._parse_canadia()
@@ -1458,6 +1477,79 @@ class BankStatementParser:
                 else:
                     i += 1
         return transactions
+
+    def _parse_taiwan(self) -> list[dict]:
+        """
+        Taiwan Cooperative Bank:
+          20250110 09:26:49 CD MB997325000137 7,000.00 9,630.85
+          Cash Deposit
+        Date: YYYYMMDD, next line = description, amounts = withdraw/deposit/balance
+        """
+        transactions = []
+        DATE_RE = re.compile(r"^(\d{8})\s+\d{2}:\d{2}:\d{2}\s+(\w+)\s+(\S+)\s+(.*)")
+        AMT_RE  = re.compile(r"([\d,]+\.\d{2})")
+        SKIP    = {"date time","pre balance","final balance","a/c no",
+                   "transaction detail","account statement","customer",
+                   "demand account","page","deposit currency"}
+
+        # Use USD section only
+        text = self.full_text
+        usd_idx = text.find("Deposit Currency: USD")
+        if usd_idx > -1:
+            next_ac = text.find("A/C No :", usd_idx + 10)
+            text = text[usd_idx:next_ac] if next_ac > -1 else text[usd_idx:]
+
+        lines = [l.strip() for l in text.split("\n")]
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if any(s in line.lower() for s in SKIP):
+                i += 1; continue
+
+            m = DATE_RE.match(line)
+            if m:
+                date_str = m.group(1)
+                code     = m.group(2).upper()
+                rest     = m.group(4)
+                i += 1
+
+                # Next line = description
+                desc = ""
+                if i < len(lines):
+                    nl = lines[i].strip()
+                    if nl and not DATE_RE.match(nl) and not any(s in nl.lower() for s in SKIP):
+                        desc = nl
+                        i += 1
+
+                try:
+                    from datetime import datetime as dt2
+                    trx_date = dt2.strptime(date_str, "%Y%m%d").date()
+                except: continue
+
+                amounts = [float(x.group(1).replace(",","")) for x in AMT_RE.finditer(rest)]
+                if len(amounts) < 2: continue
+
+                balance = amounts[-1]
+                amount  = amounts[-2]
+
+                rl = (desc + " " + code).lower()
+                is_debit = code in ("WD","LN","TF","FE","OT") or                            any(x in rl for x in ["loan","withdraw","fee","payment"])
+                is_credit = code in ("CD","CR","DP","IN","IT") or                             any(x in rl for x in ["deposit","credit","interest"])
+                if not is_debit and not is_credit:
+                    is_credit = True
+
+                if amount > 0:
+                    transactions.append({
+                        "date":      trx_date,
+                        "desc":      desc or m.group(3),
+                        "money_in":  round(amount, 2) if is_credit else 0.0,
+                        "money_out": round(amount, 2) if is_debit  else 0.0,
+                        "balance":   round(balance, 2),
+                    })
+            else:
+                i += 1
+        return transactions
+
 
     def _parse_aba(self) -> list[dict]:
         """
