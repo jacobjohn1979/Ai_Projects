@@ -1460,10 +1460,15 @@ class BankStatementParser:
         return transactions
 
     def _parse_aba(self) -> list[dict]:
-        """ABA Bank: Aug 01, 2025 DESCRIPTION 10.63 USD USD 222.64 USD"""
+        """
+        ABA Bank USD: Aug 01, 2025 DESCRIPTION 10.63 USD USD 222.64 USD
+        ABA Bank KHR: Oct 28, 2025 DESCRIPTION 160,000.00 KHR KHR 160,999.00 KHR
+        """
         transactions = []
         DATE_RE = re.compile(r"^([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})\s+(.*)")
-        AMT_RE  = re.compile(r"(\d[\d,]*\.?\d*)\s+USD")
+        # Match both USD and KHR amounts
+        currency = "KHR" if "KHR" in self.full_text[:2000] and "KHR" in self.full_text[500:3000] else "USD"
+        AMT_RE   = re.compile(r"(\d[\d,]*\.?\d*)\s+(?:USD|KHR)")
 
         for page_text in self.pages:
             for raw_line in page_text.split("\n"):
@@ -1484,9 +1489,9 @@ class BankStatementParser:
                 txn_amt   = amt_matches[-2][1]
                 txn_start = amt_matches[-2][0]
                 chunk_before = rest[:txn_start]
-                usd_before   = bool(re.search(r'\bUSD\b', chunk_before))
-                money_out = txn_amt if usd_before else 0.0
-                money_in  = txn_amt if not usd_before else 0.0
+                cur_before   = bool(re.search(r'\b(?:USD|KHR)\b', chunk_before))
+                money_out = txn_amt if cur_before else 0.0
+                money_in  = txn_amt if not cur_before else 0.0
                 desc = chunk_before
                 for pat in [r'ORIGINAL AMOUNT$',r'REF#\s*\S+',r'TRAN#\s*\S+',
                             r'HASH#\s*[0-9a-fA-F]+',r'BAKONG#\s*[0-9a-fA-F]+',
@@ -1522,15 +1527,16 @@ class BankStatementParser:
     def _fix_balances(self, opening: float, txns: list) -> list:
         """
         Recalculate running balances from scratch to ensure accuracy.
-        Only keep transactions where balance makes sense.
+        Uses stated PDF balance if available, otherwise computes from transactions.
         """
-        bal = opening
+        bal = float(opening or 0)
         result = []
         for t in txns:
             bal = round(bal + t["money_in"] - t["money_out"], 2)
             t["running_balance"] = bal
-            # Use the stated balance from PDF as O/S balance
-            t["os_balance"] = t["balance"]
+            # Use stated balance from PDF if non-zero, else use computed
+            stated = float(t.get("balance", 0) or 0)
+            t["os_balance"] = stated if stated != 0.0 else bal
             result.append(t)
         return result
 
