@@ -182,41 +182,35 @@ HTML_SHELL = """<!DOCTYPE html>
 </html>"""
 
 
-
-def _get_username(request) -> str:
-    try:
-        import jwt as _jwt, os as _os
-        token = request.cookies.get("auth_token","")
-        if not token: return "unknown"
-        payload = _jwt.decode(token, _os.getenv("JWT_SECRET",""), algorithms=["HS256"])
-        return payload.get("sub","unknown")
-    except: return "unknown"
-
-def _get_role(request) -> str:
-    try:
-        import jwt as _jwt, os as _os
-        token = request.cookies.get("auth_token","")
-        if not token: return "viewer"
-        payload = _jwt.decode(token, _os.getenv("JWT_SECRET",""), algorithms=["HS256"])
-        return payload.get("role","viewer")
-    except: return "viewer"
-
 def _shell(title, body, scripts="", request=None):
-    role     = _get_role(request)     if request else "viewer"
+    role = "viewer"
+    if request:
+        try:
+            import jwt as _jwt, os as _os
+            token = request.cookies.get("auth_token","")
+            if token:
+                payload = _jwt.decode(token, _os.getenv("JWT_SECRET",""), algorithms=["HS256"])
+                role = payload.get("role","viewer")
+        except: pass
 
-    nav = ['<a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>',
-           '<a href="/cbc/"  class="nav-link">&#x1F4CA; CBC</a>',
-           '<a href="/cbc/jobs" class="nav-link">&#x1F4CB; My Jobs</a>']
-    if role == "admin":
-        nav.append('<a href="/auth/admin/" class="nav-link" style="color:#fbbf24">&#x2699; Admin</a>')
-    nav.append('<a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>')
+    nav_items = []
+    if role in ('admin','credit_officer','coho_manager','viewer'):
+        nav_items.append(('📄 COHO', '/coho/'))
+    nav_items.append(('📊 CBC', '/cbc/'))
+    nav_items.append(('📋 My Jobs', '/cbc/jobs'))
+    if role == 'admin':
+        nav_items.append(('⚙ Admin', '/auth/admin/'))
 
-    role_badge = (f'<span style="font-size:10px;padding:2px 8px;border-radius:10px;'
-                  f'background:rgba(255,255,255,.1);color:#94a3b8;margin-right:8px">'
-                  f'{role.replace("_"," ").title()}</span>') if role else ""
+    nav_html = '\n      '.join(
+        f'<a href="{url}" class="nav-link">{label}</a>'
+        for label, url in nav_items
+    )
+    role_pill = (f'<span style="font-size:10px;padding:2px 8px;border-radius:10px;'
+                 f'background:rgba(255,255,255,.15);color:#cbd5e1;margin-right:8px">'
+                 f'{role.replace("_"," ").title()}</span>') if role != "viewer" else ""
+    logout = '<a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">→ Logout</a>'
 
-    nav_html = "\n      ".join(nav)
-    dynamic_nav = f"{role_badge}\n      {nav_html}"
+    dynamic_nav = f"{role_pill}\n      {nav_html}\n      {logout}"
 
     return (HTML_SHELL
         .replace("{title}", title)

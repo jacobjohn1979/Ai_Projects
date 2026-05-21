@@ -99,21 +99,32 @@ def _sym(currency):
 
 
 def page(title, body, request=None):
-    role     = _get_role(request)     if request else "viewer"
-    username = _get_username(request) if request else ""
+    role = "viewer"
+    if request:
+        try:
+            import jwt as _jwt, os as _os
+            token = request.cookies.get("auth_token","")
+            if token:
+                payload = _jwt.decode(token, _os.getenv("JWT_SECRET",""), algorithms=["HS256"])
+                role = payload.get("role","viewer")
+        except: pass
 
-    nav = ['<a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>']
-    if role in ("admin","credit_officer","cbc_manager","viewer"):
-        nav.append('<a href="/cbc/" class="nav-link">&#x1F4CA; CBC</a>')
-    nav.append('<a href="/coho/jobs" class="nav-link">&#x1F4CB; My Jobs</a>')
-    if role == "admin":
-        nav.append('<a href="/auth/admin/" class="nav-link" style="color:#fbbf24">&#x2699; Admin</a>')
-    nav.append('<a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>')
+    # Build nav based on role
+    nav_items = [('📄 COHO', '/coho/')]
+    if role in ('admin','credit_officer','cbc_manager','viewer'):
+        nav_items.append(('📊 CBC', '/cbc/'))
+    nav_items.append(('📋 My Jobs', '/coho/jobs'))
+    if role == 'admin':
+        nav_items.append(('⚙ Admin', '/auth/admin/'))
 
-    role_badge = (f'<span style="font-size:10px;padding:2px 8px;border-radius:10px;'
-                  f'background:rgba(255,255,255,.1);color:#94a3b8;margin-right:8px">'
-                  f'{role.replace("_"," ").title()}</span>') if role else ""
-    nav_html = "\n    ".join(nav)
+    nav_html = '\n    '.join(
+        f'<a href="{url}" class="nav-link">{label}</a>'
+        for label, url in nav_items
+    )
+    role_pill = (f'<span style="font-size:10px;padding:2px 8px;border-radius:10px;'
+                 f'background:rgba(255,255,255,.15);color:#cbd5e1;margin-right:8px">'
+                 f'{role.replace("_"," ").title()}</span>') if role != "viewer" else ""
+    logout = '<a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">→ Logout</a>'
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
@@ -128,8 +139,9 @@ def page(title, body, request=None):
          <div class="brand-sub">COHO &#8212; Bank Statement Analyser</div></div>
   </div>
   <div class="nav-links">
-    {role_badge}
+    {role_pill}
     {nav_html}
+    {logout}
   </div>
 </div>
 <div class="content">{body}</div>
@@ -593,7 +605,7 @@ def debug_jobs(request: Request):
 
 
 @app.get("/retry/{uid}", response_class=HTMLResponse)
-def retry_job(uid: str):
+def retry_job(uid: str, request: Request):
     """Clear error and retry extraction."""
     err_file = UPLOAD_DIR / (uid + "_error.txt")
     log_file = UPLOAD_DIR / (uid + "_log.json")
