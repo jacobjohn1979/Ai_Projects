@@ -137,7 +137,7 @@ def page(title, body, request=None):
 
 
 @app.get("/", response_class=HTMLResponse)
-def home():
+def home(request: Request):
     body = """
     <h1 style="font-size:20px;font-weight:700;margin-bottom:20px">Bank Statement Analyser</h1>
     <div class="card">
@@ -246,7 +246,7 @@ async def extract(request: Request, pdf_file: UploadFile = File(...)):
 
 
 @app.get("/progress/{uid}", response_class=HTMLResponse)
-def progress(uid: str):
+def progress(uid: str, request: Request):
     _start_extraction(uid)
     uid_js = json.dumps(uid)
     body = """
@@ -397,7 +397,7 @@ def poll(uid: str, from_: int = 0):
 
 
 @app.get("/result/{uid}", response_class=HTMLResponse)
-def result(uid: str):
+def result(uid: str, request: Request):
     rf = UPLOAD_DIR / (uid + "_result.json")
     if not rf.exists():
         return HTMLResponse(page("Error",
