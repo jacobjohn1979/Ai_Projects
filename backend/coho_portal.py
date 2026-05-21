@@ -7,7 +7,7 @@ import os, io, json, uuid, logging, threading
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile, Request
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 
@@ -98,32 +98,41 @@ def _sym(currency):
     return "$", lambda v: "{:,.2f}".format(float(v))
 
 
-def page(title, body):
+def page(title, body, request=None):
+    role     = _get_role(request)     if request else "viewer"
+    username = _get_username(request) if request else ""
+
+    nav = ['<a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>']
+    if role in ("admin","credit_officer","cbc_manager","viewer"):
+        nav.append('<a href="/cbc/" class="nav-link">&#x1F4CA; CBC</a>')
+    nav.append('<a href="/coho/jobs" class="nav-link">&#x1F4CB; My Jobs</a>')
+    if role == "admin":
+        nav.append('<a href="/auth/admin/" class="nav-link" style="color:#fbbf24">&#x2699; Admin</a>')
+    nav.append('<a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>')
+
+    role_badge = (f'<span style="font-size:10px;padding:2px 8px;border-radius:10px;'
+                  f'background:rgba(255,255,255,.1);color:#94a3b8;margin-right:8px">'
+                  f'{role.replace("_"," ").title()}</span>') if role else ""
+    nav_html = "\n    ".join(nav)
+
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Credit Assessment Portal - {title}</title>
+<title>Credit Assessment Tools - {title}</title>
 <style>{CSS}</style></head>
 <body>
 <div class="topbar">
   <div class="brand">
     <div class="brand-icon">COHO</div>
-    <div><div class="brand-title">Credit Assessment Portal</div>
-         <div class="brand-sub">COHO — Bank Statement Analyser</div></div>
+    <div><div class="brand-title">Credit Assessment Tools</div>
+         <div class="brand-sub">COHO &#8212; Bank Statement Analyser</div></div>
   </div>
   <div class="nav-links">
-    <a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>
-    <a href="/cbc/" class="nav-link">&#x1F4CA; CBC</a>
-    <a href="/coho/jobs" class="nav-link">&#x1F4CB; My Jobs</a>
-    <a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>
+    {role_badge}
+    {nav_html}
   </div>
 </div>
-<div class="content">
-<div class="print-header" style="text-align:center;padding:10px 0 20px;border-bottom:2px solid #1F4E79;margin-bottom:20px">
-  <div style="font-size:18px;font-weight:700;color:#1F4E79">Conduct of Account (COHO) Summary</div>
-  <div style="font-size:12px;color:#64748b;margin-top:4px">Credit Assessment Tools</div>
-</div>
-{body}</div>
+<div class="content">{body}</div>
 </body></html>"""
 
 
@@ -188,7 +197,7 @@ def home():
         });
     }
     </script>"""
-    return HTMLResponse(page("Upload", body))
+    return HTMLResponse(page("Upload", body, request))
 
 
 
@@ -294,7 +303,7 @@ def progress(uid: str):
         .catch(function() {});
     }, 1000);
     </script>"""
-    return HTMLResponse(page("Processing", body))
+    return HTMLResponse(page("Processing", body, request))
 
 
 def _start_extraction(uid):
@@ -392,7 +401,7 @@ def result(uid: str):
     rf = UPLOAD_DIR / (uid + "_result.json")
     if not rf.exists():
         return HTMLResponse(page("Error",
-            '<div style="color:red;padding:20px">Result not found. <a href="/coho/">Upload again</a></div>'))
+            request, '<div style="color:red;padding:20px">Result not found. <a href="/coho/">Upload again</a></div>'))
     data   = json.loads(rf.read_text())
     header = data.get("header", {})
     an     = data.get("analytics", {})
@@ -490,7 +499,7 @@ def result(uid: str):
         '<a href="/coho/download/' + uid + '" class="btn btn-primary btn-lg no-print">&#x2B07; Download Excel</a>'
         '<button onclick="window.print()" class="btn btn-ghost" style="border-color:#1F4E79;color:#1F4E79;margin-left:10px">&#x1F5B6; Print / Save PDF</button></div>'
     )
-    return HTMLResponse(page("Results", body))
+    return HTMLResponse(page("Results", body, request))
 
 
 @app.get("/download/{uid}")
@@ -507,7 +516,7 @@ def download(uid: str):
 
 
 @app.get("/debug", response_class=HTMLResponse)
-def debug_jobs():
+def debug_jobs(request: Request):
     """Show all jobs with their status - for debugging failed extractions."""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     current_user = _get_username(request)
@@ -580,7 +589,7 @@ def debug_jobs():
         </table>
       </div>
     </div>"""
-    return HTMLResponse(page("Debug", body))
+    return HTMLResponse(page("Debug", body, request))
 
 
 @app.get("/retry/{uid}", response_class=HTMLResponse)
@@ -870,7 +879,7 @@ def jobs_history(request: Request):
         </table>
       </div>
     </div>"""
-    return HTMLResponse(page("Jobs History", body))
+    return HTMLResponse(page("Jobs History", body, request))
 
 
 @app.post("/jobs/clear")

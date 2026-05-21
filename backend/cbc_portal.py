@@ -167,10 +167,7 @@ HTML_SHELL = """<!DOCTYPE html>
       </div>
     </div>
     <div class="nav-links">
-      <a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>
-      <a href="/cbc/" class="nav-link">&#x1F4CA; CBC</a>
-      <a href="/cbc/jobs" class="nav-link">&#x1F4CB; My Jobs</a>
-      <a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>
+      {nav}
     </div>
   </div>
   <div class="content">
@@ -185,12 +182,29 @@ HTML_SHELL = """<!DOCTYPE html>
 </html>"""
 
 
-def _shell(title, body, scripts=""):
+def _shell(title, body, scripts="", request=None):
+    role     = _get_role(request)     if request else "viewer"
+
+    nav = ['<a href="/coho/" class="nav-link">&#x1F4C4; COHO</a>',
+           '<a href="/cbc/"  class="nav-link">&#x1F4CA; CBC</a>',
+           '<a href="/cbc/jobs" class="nav-link">&#x1F4CB; My Jobs</a>']
+    if role == "admin":
+        nav.append('<a href="/auth/admin/" class="nav-link" style="color:#fbbf24">&#x2699; Admin</a>')
+    nav.append('<a href="/auth/logout" class="nav-link" style="color:#f87171;border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:5px 12px">&#x2192; Logout</a>')
+
+    role_badge = (f'<span style="font-size:10px;padding:2px 8px;border-radius:10px;'
+                  f'background:rgba(255,255,255,.1);color:#94a3b8;margin-right:8px">'
+                  f'{role.replace("_"," ").title()}</span>') if role else ""
+
+    nav_html = "\n      ".join(nav)
+    dynamic_nav = f"{role_badge}\n      {nav_html}"
+
     return (HTML_SHELL
         .replace("{title}", title)
         .replace("{css}", CSS)
         .replace("{body}", body)
-        .replace("{scripts}", scripts))
+        .replace("{scripts}", scripts)
+        .replace("{nav}", dynamic_nav))
 
 
 def _pill(status: str) -> str:
@@ -213,7 +227,7 @@ def _fmt_amount(amount, currency="USD") -> str:
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-def index():
+def index(request: Request):
     body = """
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
       <div>
@@ -363,7 +377,7 @@ function doUpload() {
 }
 </script>"""
 
-    return HTMLResponse(_shell("Upload", body, scripts))
+    return HTMLResponse(_shell("Upload", body, scripts, request=request))
 
 
 @app.post("/extract", response_class=HTMLResponse)
@@ -385,7 +399,7 @@ async def extract(pdf_file: UploadFile = File(...)):
 
 
 @app.get("/progress/{uid}", response_class=HTMLResponse)
-def progress_page(uid: str):
+def progress_page(uid: str, request: Request):
     import threading, asyncio
     def _run():
         loop = asyncio.new_event_loop()
@@ -451,7 +465,7 @@ def progress_page(uid: str):
       }} catch(e) {{ /* retry */ }}
     }}, 800);
     </script>"""
-    return HTMLResponse(_shell("Processing", body))
+    return HTMLResponse(_shell("Processing", body, request=request))
 
 
 @app.get("/run/{uid}")
@@ -567,7 +581,7 @@ def poll(uid: str, from_: int = 0):
     })
 
 @app.get("/result/{uid}", response_class=HTMLResponse)
-def result_page(uid: str):
+def result_page(uid: str, request: Request):
     result_file = UPLOAD_DIR / f"{uid}_result.json"
     if not result_file.exists():
         return HTMLResponse(_shell("Error",
@@ -631,7 +645,7 @@ function showTab(idx) {
   document.querySelectorAll('.tab-content').forEach((p,i) => p.className='tab-content'+(i===idx?' active':''));
 }
 </script>"""
-    return HTMLResponse(_shell("Results", body, scripts))
+    return HTMLResponse(_shell("Results", body, scripts, request=request))
 
     # ── Build preview ─────────────────────────────────────────────────────────
     tabs_html  = '<div class="tab-row">'
@@ -735,7 +749,7 @@ function showTab(idx) {
 }
 </script>"""
 
-    return HTMLResponse(_shell("Review", body, scripts))
+    return HTMLResponse(_shell("Review", body, scripts, request=request))
 
 
 def _build_applicant_panel(app: dict, idx: int, active_cls: str) -> str:
@@ -1086,7 +1100,7 @@ def jobs_history(request: Request):
         </table>
       </div>
     </div>"""
-    return HTMLResponse(_shell("Jobs History", body))
+    return HTMLResponse(_shell("Jobs History", body, request=request))
 
 
 @app.get("/health")
