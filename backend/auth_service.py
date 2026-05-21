@@ -36,9 +36,55 @@ app = FastAPI(title="Auth Service")
 
 # ── Role → allowed portals ────────────────────────────────────────────────────
 ROLE_ACCESS = {
-    "admin":        ["/coho/", "/cbc/", "/trainer/", "/portal/", "/loan/", "/auth/admin"],
-    "staff":        ["/coho/", "/cbc/", "/portal/"],
-    "loan_officer": ["/portal/", "/loan/"],
+    "admin":          ["/coho/", "/cbc/", "/trainer/", "/portal/", "/loan/", "/auth/"],
+    "credit_officer": ["/coho/", "/cbc/", "/portal/"],
+    "coho_manager":   ["/coho/"],
+    "cbc_manager":    ["/cbc/"],
+    "loan_officer":   ["/portal/", "/loan/"],
+    "viewer":         ["/coho/", "/cbc/"],
+}
+
+# Module definitions for UI
+MODULES = {
+    "coho": {
+        "label": "COHO — Bank Statement",
+        "path":  "/coho/",
+        "icon":  "📄",
+        "roles": ["admin", "credit_officer", "coho_manager", "viewer"],
+    },
+    "cbc": {
+        "label": "CBC — Credit Bureau",
+        "path":  "/cbc/",
+        "icon":  "📊",
+        "roles": ["admin", "credit_officer", "cbc_manager", "viewer"],
+    },
+    "trainer": {
+        "label": "Bank Format Trainer",
+        "path":  "/trainer/",
+        "icon":  "🎓",
+        "roles": ["admin"],
+    },
+    "portal": {
+        "label": "KYC Staff Portal",
+        "path":  "/portal/",
+        "icon":  "🏦",
+        "roles": ["admin", "credit_officer", "loan_officer"],
+    },
+    "loan": {
+        "label": "Loan Officer Portal",
+        "path":  "/loan/",
+        "icon":  "💰",
+        "roles": ["admin", "loan_officer"],
+    },
+}
+
+ROLE_LABELS = {
+    "admin":          "System Administrator",
+    "credit_officer": "Credit Officer (COHO + CBC)",
+    "coho_manager":   "COHO Manager (Bank Statements)",
+    "cbc_manager":    "CBC Manager (Credit Bureau)",
+    "loan_officer":   "Loan Officer (Portal + Loan)",
+    "viewer":         "Viewer (Read Only)",
 }
 
 # ── User store ────────────────────────────────────────────────────────────────
@@ -167,6 +213,7 @@ td{padding:9px 10px;border-bottom:1px solid #f1f5f9}
 .badge-admin{background:#fef3c7;color:#92400e}
 .badge-staff{background:#d1fae5;color:#065f46}
 .badge-loan{background:#dbeafe;color:#1e40af}
+.badge-ghost{background:#f1f5f9;color:#64748b}
 .badge-active{background:#d1fae5;color:#065f46}
 .badge-locked{background:#fee2e2;color:#991b1b}
 .abtn{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border-radius:6px;
@@ -270,7 +317,9 @@ async def post_login(
     # Determine redirect
     role    = user["role"]
     allowed = ROLE_ACCESS.get(role, [])
-    dest    = redirect if redirect and redirect != "/" else allowed[0] if allowed else "/"
+    # Filter out /auth/ from landing destinations
+    landing = [p for p in allowed if not p.startswith("/auth")]
+    dest    = redirect if redirect and redirect != "/" else (landing[0] if landing else "/auth/admin")
 
     response = RedirectResponse(dest, status_code=302)
     response.set_cookie(
@@ -351,26 +400,65 @@ def _require_admin(request: Request):
         raise HTTPException(status_code=403, detail="Admin only")
     return payload
 
-def admin_page(content, username=""):
+def admin_page(body, username="", active="users"):
+    nav_items = [
+        ("users",   "/auth/admin",         "👥 Users",     "Manage user accounts"),
+        ("audit",   "/auth/admin/audit",   "📋 Audit Log", "View all activity"),
+        ("modules", "/auth/admin/modules", "🔧 Modules",   "Module access overview"),
+    ]
+    nav_html = ""
+    for key, href, label, _ in nav_items:
+        active_style = "background:rgba(255,255,255,.15);font-weight:700" if key==active else ""
+        nav_html += (f'<a href="{href}" style="display:flex;align-items:center;gap:8px;'
+                     f'padding:10px 16px;color:#f1f5f9;text-decoration:none;border-radius:8px;'
+                     f'font-size:13px;margin-bottom:4px;{active_style}">{label}</a>')
+
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>User Management</title>
-<style>{CSS}</style></head>
+<title>Credit Assessment Tools — Admin</title>
+<style>{CSS}
+body.admin-body{{display:flex;flex-direction:column;background:#f8fafc;min-height:100vh}}
+.admin-layout{{display:flex;flex:1;margin-top:56px}}
+.sidebar{{width:220px;background:#1a2744;min-height:calc(100vh - 56px);
+          padding:16px 12px;position:fixed;top:56px;left:0}}
+.main-content{{margin-left:220px;flex:1;padding:24px}}
+</style></head>
 <body class="admin-body">
 <div class="topbar">
   <div style="display:flex;align-items:center;gap:12px">
-    <div style="width:32px;height:32px;background:#dc2626;border-radius:7px;
+    <div style="width:32px;height:32px;background:#2563eb;border-radius:7px;
                 display:flex;align-items:center;justify-content:center;
-                font-size:10px;font-weight:800;color:#fff">KYC</div>
-    <div style="font-size:14px;font-weight:700;color:#f1f5f9">User Management</div>
+                font-size:10px;font-weight:800;color:#fff">CAT</div>
+    <div>
+      <div style="font-size:13px;font-weight:700;color:#f1f5f9">Credit Assessment Tools</div>
+      <div style="font-size:10px;color:#94a3b8">Administration Panel</div>
+    </div>
   </div>
-  <div style="display:flex;gap:12px;align-items:center">
-    <span style="color:#94a3b8;font-size:13px">{username}</span>
-    <a href="/auth/logout" style="color:#94a3b8;font-size:12px;text-decoration:none">Logout</a>
+  <div style="display:flex;gap:16px;align-items:center">
+    <a href="/coho/" style="color:#94a3b8;font-size:12px;text-decoration:none">📄 COHO</a>
+    <a href="/cbc/"  style="color:#94a3b8;font-size:12px;text-decoration:none">📊 CBC</a>
+    <span style="color:#475569;font-size:12px">{username}</span>
+    <a href="/auth/logout" style="color:#f87171;font-size:12px;text-decoration:none;
+       border:1px solid rgba(248,113,113,.3);padding:4px 10px;border-radius:6px">Logout</a>
   </div>
 </div>
-<div class="content">{content}</div>
+<div class="admin-layout">
+  <div class="sidebar">
+    <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.8px;
+                text-transform:uppercase;margin-bottom:12px;padding:0 4px">Admin Menu</div>
+    {nav_html}
+    <div style="margin-top:24px;border-top:1px solid rgba(255,255,255,.1);padding-top:16px">
+      <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.8px;
+                  text-transform:uppercase;margin-bottom:12px;padding:0 4px">Portals</div>
+      <a href="/coho/" style="display:block;padding:8px 16px;color:#94a3b8;
+         text-decoration:none;font-size:12px;border-radius:6px">📄 COHO Portal</a>
+      <a href="/cbc/"  style="display:block;padding:8px 16px;color:#94a3b8;
+         text-decoration:none;font-size:12px;border-radius:6px">📊 CBC Portal</a>
+    </div>
+  </div>
+  <div class="main-content">{body}</div>
+</div>
 </body></html>"""
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -389,7 +477,14 @@ def admin_users(request: Request):
         status   = '<span class="badge badge-locked">Locked</span>' if locked else \
                    ('<span class="badge badge-active">Active</span>' if u.get("active",True) else
                     '<span class="badge badge-locked">Disabled</span>')
-        role_cls = {"admin":"badge-admin","staff":"badge-staff","loan_officer":"badge-loan"}.get(u["role"],"")
+        role_cls = {
+            "admin":          "badge-admin",
+            "credit_officer": "badge-staff",
+            "coho_manager":   "badge-staff",
+            "cbc_manager":    "badge-staff",
+            "loan_officer":   "badge-loan",
+            "viewer":         "badge-ghost",
+        }.get(u["role"],"")
         last_login = u.get("last_login","Never")
         if last_login and last_login != "Never":
             last_login = last_login[:16].replace("T"," ")
@@ -426,7 +521,7 @@ def admin_users(request: Request):
         <tbody>{rows}</tbody>
       </table>
     </div>"""
-    return HTMLResponse(admin_page(content, payload.get("sub","")))
+    return HTMLResponse(admin_page(content, payload.get("sub",""), "users"))
 
 
 @app.get("/admin/add", response_class=HTMLResponse)
@@ -450,9 +545,12 @@ def add_user_form(request: Request, msg: str = ""):
           <input name="email" type="email" placeholder="john@bank.com"></div>
         <div class="form-group"><label>Role *</label>
           <select name="role" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px">
-            <option value="staff">Staff (COHO + CBC + Portal)</option>
+            <option value="credit_officer">Credit Officer (COHO + CBC + Portal)</option>
+            <option value="coho_manager">COHO Manager (Bank Statements only)</option>
+            <option value="cbc_manager">CBC Manager (Credit Bureau only)</option>
             <option value="loan_officer">Loan Officer (Portal + Loan)</option>
-            <option value="admin">Admin (All portals)</option>
+            <option value="viewer">Viewer (Read Only - COHO + CBC)</option>
+            <option value="admin">System Administrator (All portals)</option>
           </select></div>
         <div class="form-group"><label>Password *</label>
           <input name="password" type="password" required placeholder="Min 8 characters"></div>
@@ -462,7 +560,7 @@ def add_user_form(request: Request, msg: str = ""):
         </div>
       </form>
     </div>"""
-    return HTMLResponse(admin_page(form, payload.get("sub","")))
+    return HTMLResponse(admin_page(form, payload.get("sub",""), "users"))
 
 
 @app.post("/admin/add")
@@ -539,7 +637,7 @@ def reset_pw_form(username: str, request: Request):
         </div>
       </form>
     </div>"""
-    return HTMLResponse(admin_page(form, payload.get("sub","")))
+    return HTMLResponse(admin_page(form, payload.get("sub",""), "users"))
 
 
 @app.post("/admin/reset/{username}")
@@ -603,6 +701,78 @@ def audit_log(request: Request, limit: int = 100):
     </div>"""
     return HTMLResponse(admin_page(content, payload.get("sub","")))
 
+
+
+@app.get("/admin/modules", response_class=HTMLResponse)
+def admin_modules(request: Request):
+    """Module access overview page."""
+    try:
+        payload = _require_admin(request)
+    except HTTPException as e:
+        return RedirectResponse(e.headers.get("Location","/auth/login"))
+
+    users = _load_users()
+
+    # Build module access table
+    module_rows = ""
+    for mod_key, mod in MODULES.items():
+        user_list = [u["username"] for u in users.values()
+                     if u.get("role") in mod["roles"] and u.get("active", True)]
+        role_list = ", ".join(mod["roles"])
+        module_rows += f"""<tr>
+          <td><strong>{mod["icon"]} {mod["label"]}</strong></td>
+          <td style="font-family:monospace;font-size:12px">{mod["path"]}</td>
+          <td style="font-size:12px;color:#64748b">{role_list}</td>
+          <td style="font-size:12px">{", ".join(user_list) or "—"}</td>
+        </tr>"""
+
+    # Build role access table
+    role_rows = ""
+    for role, label in ROLE_LABELS.items():
+        paths = ROLE_ACCESS.get(role, [])
+        count = sum(1 for u in users.values() if u.get("role") == role)
+        role_rows += f"""<tr>
+          <td><strong>{role}</strong></td>
+          <td style="font-size:12px;color:#475569">{label}</td>
+          <td style="font-size:12px;font-family:monospace">{" | ".join(paths)}</td>
+          <td style="text-align:center">{count}</td>
+        </tr>"""
+
+    body = f"""
+    <div style="margin-bottom:20px">
+      <h1 style="font-size:20px;font-weight:700">Module Access</h1>
+      <p style="font-size:13px;color:#64748b;margin-top:4px">
+        Overview of which roles can access each module
+      </p>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-title">Modules & Access</div>
+      <table>
+        <thead><tr style="background:#D6E4F0">
+          <th style="padding:10px">Module</th>
+          <th style="padding:10px">URL Path</th>
+          <th style="padding:10px">Allowed Roles</th>
+          <th style="padding:10px">Active Users</th>
+        </tr></thead>
+        <tbody>{module_rows}</tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Roles & Permissions</div>
+      <table>
+        <thead><tr style="background:#D6E4F0">
+          <th style="padding:10px">Role</th>
+          <th style="padding:10px">Description</th>
+          <th style="padding:10px">Accessible Paths</th>
+          <th style="padding:10px;text-align:center">Users</th>
+        </tr></thead>
+        <tbody>{role_rows}</tbody>
+      </table>
+    </div>"""
+
+    return HTMLResponse(admin_page(body, payload.get("sub",""), "modules"))
 
 @app.get("/health")
 def health():
