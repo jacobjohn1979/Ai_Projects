@@ -7,7 +7,7 @@ import os, io, json, uuid, logging, threading
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, Request, File, UploadFile
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 
@@ -779,119 +779,148 @@ def pdf_summary(uid: str):
 
 @app.get("/jobs", response_class=HTMLResponse)
 def jobs_history(request: Request):
-    """Show all completed and failed jobs with links to results."""
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    """Unified jobs history — shows COHO + CBC + future modules."""
     current_user = _get_username(request)
     current_role = _get_role(request)
-    jobs = sorted(UPLOAD_DIR.glob("*_job.json"),
-                  key=lambda f: f.stat().st_mtime, reverse=True)
-    # Filter by user unless admin
-    if current_role != "admin":
-        filtered = []
-        for jf in jobs:
+    import datetime
+
+    # Define all modules and their upload dirs
+    MODULE_DIRS = {
+        "COHO": (UPLOAD_DIR, "/coho/result/", "/coho/download/", "/coho/retry/"),
+        "CBC":  (UPLOAD_DIR.parent / "cbc", "/cbc/result/", "/cbc/download/", None),
+    }
+
+    all_jobs = []
+    for module, (d, view_url, dl_url, retry_url) in MODULE_DIRS.items():
+        if not d.exists():
+            continue
+        for jf in d.glob("*_job.json"):
             try:
-                j = json.loads(jf.read_text())
-                if j.get("username","unknown") == current_user:
-                    filtered.append(jf)
+                job = json.loads(jf.read_text())
+                job["_module"]    = module
+                job["_jf"]        = jf
+                job["_view_url"]  = view_url
+                job["_dl_url"]    = dl_url
+                job["_retry_url"] = retry_url
+                job["_mtime"]     = jf.stat().st_mtime
+                # Filter by user unless admin
+                if current_role != "admin" and job.get("username","unknown") != current_user:
+                    continue
+                all_jobs.append(job)
             except: pass
-        jobs = filtered
 
+    all_jobs.sort(key=lambda j: j["_mtime"], reverse=True)
+
+    counts = {"done":0, "error":0, "processing":0}
     rows = ""
-    counts = {"done": 0, "error": 0, "processing": 0}
 
-    for jf in jobs[:100]:
-        uid = jf.stem.replace("_job","")
-        try:
-            job      = json.loads(jf.read_text())
-            done     = (UPLOAD_DIR / (uid+"_result.json")).exists()
-            err_file = UPLOAD_DIR / (uid+"_error.txt")
-            log_file = UPLOAD_DIR / (uid+"_log.json")
+    for job in all_jobs[:200]:
+        uid      = job["uid"]
+        module   = job["_module"]
+        jf       = job["_jf"]
+        d        = jf.parent
+        view_url = job["_view_url"]
+        dl_url   = job["_dl_url"]
+        retry_url= job["_retry_url"]
 
-            if done:
-                status = "done"; counts["done"] += 1
-                status_html = '<span style="color:#059669;font-weight:600">&#x2713; Done</span>'
-            elif err_file.exists():
-                status = "error"; counts["error"] += 1
-                status_html = '<span style="color:#dc2626;font-weight:600">&#x2717; Error</span>'
-            else:
-                status = "processing"; counts["processing"] += 1
-                status_html = '<span style="color:#d97706;font-weight:600">&#x23F3; Processing</span>'
+        done     = (d / (uid+"_result.json")).exists()
+        err_file = d / (uid+"_error.txt")
 
-            # Get summary from result if done
-            summary = ""
-            if done:
-                try:
-                    r  = json.loads((UPLOAD_DIR/(uid+"_result.json")).read_text())
-                    an = r.get("analytics",{})
-                    h  = r.get("header",{})
+        if done:
+            status = "done"; counts["done"] += 1
+            badge  = '<span style="color:#059669;font-weight:600">&#x2713; Done</span>'
+        elif err_file.exists():
+            status = "error"; counts["error"] += 1
+            badge  = '<span style="color:#dc2626;font-weight:600">&#x2717; Error</span>'
+        else:
+            status = "processing"; counts["processing"] += 1
+            badge  = '<span style="color:#d97706;font-weight:600">&#x23F3; Processing</span>'
+
+        # Summary
+        summary = ""
+        if done:
+            try:
+                r = json.loads((d/(uid+"_result.json")).read_text())
+                if module == "COHO":
+                    an  = r.get("analytics",{})
+                    h   = r.get("header",{})
                     cur = h.get("currency","USD")
                     sym = "KHR " if cur=="KHR" else "$ "
-                    fmt = (lambda v: "{:,.0f}".format(float(v))) if cur=="KHR" else (lambda v: "{:,.2f}".format(float(v)))
-                    summary = (f"<span style='color:#059669'>&uarr; {sym}{fmt(an.get('total_in_amt',0))}</span> "
-                               f"<span style='color:#dc2626'>&darr; {sym}{fmt(an.get('total_out_amt',0))}</span> "
-                               f"| {r.get('total_transactions',0)} txns | {an.get('period_months',0)} months")
-                except: pass
-            elif err_file.exists():
-                summary = f'<span style="color:#dc2626;font-size:11px">{err_file.read_text()[:80]}</span>'
+                    fmt = (lambda v: f"{float(v):,.0f}") if cur=="KHR" else (lambda v: f"{float(v):,.2f}")
+                    summary = (f'<span style="color:#059669">&#8593;{sym}{fmt(an.get("total_in_amt",0))}</span> '
+                               f'<span style="color:#dc2626">&#8595;{sym}{fmt(an.get("total_out_amt",0))}</span> '
+                               f'| {r.get("total_transactions",0)} txns')
+                else:
+                    apps = r.get("applicants",[])
+                    summary = f"{len(apps)} applicant(s)"
+                    if apps:
+                        p = apps[0].get("personal",{})
+                        summary += f" | {p.get('full_name_en','')}"
+            except: pass
+        elif err_file.exists():
+            summary = f'<span style="color:#dc2626;font-size:11px">{err_file.read_text()[:60]}</span>'
 
-            # File modified time as upload time
-            import datetime
-            mtime = datetime.datetime.fromtimestamp(jf.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        mtime    = datetime.datetime.fromtimestamp(job["_mtime"]).strftime("%Y-%m-%d %H:%M")
+        user_col = f'<td style="font-size:11px;color:#64748b">{job.get("username","?")}</td>' if current_role=="admin" else ""
+        mod_col  = f'<td><span style="font-size:10px;padding:2px 8px;border-radius:10px;background:#dbeafe;color:#1e40af">{module}</span></td>'
 
-            rows += f"""<tr>
-              <td style="font-size:11px;color:#94a3b8;white-space:nowrap">{mtime}</td>
-              {"<td style='font-size:11px;color:#64748b'>" + job.get('username','?') + "</td>" if current_role == "admin" else ""}
-              <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-                  title="{job.get('filename','?')}">{job.get('filename','?')}</td>
-              <td style="font-size:11px">{job.get('size_mb',0)} MB</td>
-              <td>{status_html}</td>
-              <td style="font-size:11px">{summary}</td>
-              <td style="white-space:nowrap">
-                {"<a href='/coho/result/"+uid+"' style='font-size:12px;color:#2563eb;margin-right:8px'>View</a>" if done else ""}
-                {"<a href='/coho/download/"+uid+"' style='font-size:12px;color:#059669;margin-right:8px'>Excel</a>" if done else ""}
-                {"<a href='/coho/retry/"+uid+"' style='font-size:12px;color:#dc2626'>Retry</a>" if status=="error" else ""}
-              </td>
-            </tr>"""
-        except Exception as e:
-            rows += f"<tr><td colspan='6' style='color:#dc2626;font-size:11px;padding:8px'>{uid}: {e}</td></tr>"
+        actions  = ""
+        if done:
+            actions += f'<a href="{view_url}{uid}" style="font-size:12px;color:#2563eb;margin-right:8px">View</a>'
+            actions += f'<a href="{dl_url}{uid}" style="font-size:12px;color:#059669;margin-right:8px">Excel</a>'
+        if status == "error" and retry_url:
+            actions += f'<a href="{retry_url}{uid}" style="font-size:12px;color:#dc2626">Retry</a>'
 
-    total = len(jobs)
+        rows += f"""<tr>
+          <td style="font-size:11px;color:#94a3b8;white-space:nowrap">{mtime}</td>
+          {mod_col}
+          {user_col}
+          <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+              title="{job.get('filename','?')}">{job.get('filename','?')}</td>
+          <td style="font-size:11px">{job.get('size_mb',0)} MB</td>
+          <td>{badge}</td>
+          <td style="font-size:11px">{summary}</td>
+          <td style="white-space:nowrap">{actions}</td>
+        </tr>"""
+
+    user_hdr = "<th style='padding:8px;color:#1F4E79'>User</th>" if current_role=="admin" else ""
     body = f"""
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
       <div>
-        <h1 style="font-size:20px;font-weight:700">Jobs History</h1>
+        <h1 style="font-size:20px;font-weight:700">My Jobs</h1>
         <p style="font-size:13px;color:#64748b;margin-top:3px">
-          {total} total &nbsp;|&nbsp;
+          All credit assessment jobs &nbsp;|&nbsp;
           <span style="color:#059669">&#x2713; {counts['done']} done</span> &nbsp;|&nbsp;
           <span style="color:#dc2626">&#x2717; {counts['error']} failed</span> &nbsp;|&nbsp;
-          <span style="color:#d97706">&#x23F3; {counts['processing']} processing</span>
+          <span style="color:#d97706">&#x23F3; {counts['processing']} running</span>
         </p>
       </div>
       <div style="display:flex;gap:10px">
-        <a href="/coho/" class="btn btn-primary">+ New Upload</a>
-        <button onclick="if(confirm('Clear all old jobs?')){{fetch('/coho/jobs/clear',{{method:'POST'}}).then(()=>location.reload())}}"
-                class="btn btn-ghost no-print" style="color:#dc2626">Clear Old</button>
+        <a href="/coho/" class="btn btn-primary">+ COHO Upload</a>
+        <a href="/cbc/"  class="btn btn-ghost">+ CBC Upload</a>
       </div>
     </div>
     <div class="card">
       <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="background:#D6E4F0">
-            <th style="padding:10px;text-align:left;color:#1F4E79">Time</th>
-            {"<th style='padding:10px;text-align:left;color:#1F4E79'>User</th>" if current_role == "admin" else ""}
-            <th style="padding:10px;text-align:left;color:#1F4E79">File</th>
-            <th style="padding:10px;color:#1F4E79">Size</th>
-            <th style="padding:10px;color:#1F4E79">Status</th>
-            <th style="padding:10px;text-align:left;color:#1F4E79">Summary</th>
-            <th style="padding:10px;color:#1F4E79">Actions</th>
+            <th style="padding:8px;text-align:left;color:#1F4E79">Time</th>
+            <th style="padding:8px;color:#1F4E79">Module</th>
+            {user_hdr}
+            <th style="padding:8px;text-align:left;color:#1F4E79">File</th>
+            <th style="padding:8px;color:#1F4E79">Size</th>
+            <th style="padding:8px;color:#1F4E79">Status</th>
+            <th style="padding:8px;text-align:left;color:#1F4E79">Summary</th>
+            <th style="padding:8px;color:#1F4E79">Actions</th>
           </tr></thead>
           <tbody>
-            {rows if rows else "<tr><td colspan='6' style='text-align:center;padding:30px;color:#94a3b8'>No jobs yet — upload a PDF to get started</td></tr>"}
+            {rows if rows else
+             "<tr><td colspan='8' style='text-align:center;padding:30px;color:#94a3b8'>No jobs yet</td></tr>"}
           </tbody>
         </table>
       </div>
     </div>"""
-    return HTMLResponse(page("Jobs History", body, request))
+    return HTMLResponse(page("My Jobs", body, request))
 
 
 @app.post("/jobs/clear")
