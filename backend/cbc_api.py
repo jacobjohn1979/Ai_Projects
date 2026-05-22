@@ -15,11 +15,12 @@ import requests
 log = logging.getLogger("cbc_api")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-API_URL     = os.getenv("CBC_API_URL", "https://api.cbc.com.kh/ws/service")
-API_USER    = os.getenv("CBC_API_USER", "")
-API_MEMBER  = os.getenv("CBC_API_MEMBER_ID", "")
-API_TIMEOUT = int(os.getenv("CBC_API_TIMEOUT", "30"))
-CACHE_TTL   = int(os.getenv("CBC_CACHE_DAYS", "30"))
+API_URL      = os.getenv("CBC_API_URL", "https://api.cbc.com.kh/ws/service")
+API_USER     = os.getenv("CBC_API_USER", "")
+API_PASSWORD = os.getenv("CBC_API_PASSWORD", "")
+API_MEMBER   = os.getenv("CBC_API_MEMBER_ID", "")
+API_TIMEOUT  = int(os.getenv("CBC_API_TIMEOUT", "30"))
+CACHE_TTL    = int(os.getenv("CBC_CACHE_DAYS", "30"))
 
 UPLOAD_DIR  = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 CACHE_DIR   = UPLOAD_DIR / "cbc" / "api_cache"
@@ -133,6 +134,7 @@ def build_request(
             "SERVICE":   "CBAJSNEN2",
             "ACTION":    "A_SC",
             "USER":      API_USER,
+            "PASSWORD":  API_PASSWORD,
             "MEMBER_ID": API_MEMBER,
             "MESSAGE": {
                 "ENQUIRY": {
@@ -180,8 +182,11 @@ def build_request(
 
 def call_api(payload: dict) -> dict:
     """Call CBC API and return response dict."""
-    if not API_URL or not API_USER or not API_MEMBER:
-        raise ValueError("CBC API not configured. Set CBC_API_URL, CBC_API_USER, CBC_API_MEMBER_ID in .env")
+    if not API_URL or not API_USER or not API_PASSWORD or not API_MEMBER:
+        raise ValueError(
+            "CBC API not configured. Set CBC_API_URL, CBC_API_USER, "
+            "CBC_API_PASSWORD, CBC_API_MEMBER_ID in .env"
+        )
 
     headers = {"Content-Type": "application/json"}
     resp = requests.post(
