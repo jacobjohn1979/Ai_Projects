@@ -250,6 +250,25 @@ def _fmt_amount(amount, currency="USD") -> str:
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
+
+def _get_username(request) -> str:
+    try:
+        import jwt as _jwt, os as _os
+        token = request.cookies.get("auth_token","")
+        if not token: return "unknown"
+        payload = _jwt.decode(token, _os.getenv("JWT_SECRET",""), algorithms=["HS256"])
+        return payload.get("sub","unknown")
+    except: return "unknown"
+
+def _get_role(request) -> str:
+    try:
+        import jwt as _jwt, os as _os
+        token = request.cookies.get("auth_token","")
+        if not token: return "viewer"
+        payload = _jwt.decode(token, _os.getenv("JWT_SECRET",""), algorithms=["HS256"])
+        return payload.get("role","viewer")
+    except: return "viewer"
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     body = """
