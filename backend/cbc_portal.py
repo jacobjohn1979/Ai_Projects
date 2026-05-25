@@ -396,7 +396,7 @@ function doUpload() {
 
 
 @app.post("/extract", response_class=HTMLResponse)
-async def extract(pdf_file: UploadFile = File(...)):
+async def extract(request: Request, pdf_file: UploadFile = File(...)):
     """Upload PDF and redirect to progress page."""
     uid      = str(uuid.uuid4())[:8]
     pdf_path = UPLOAD_DIR / f"{uid}_{pdf_file.filename}"
@@ -409,6 +409,7 @@ async def extract(pdf_file: UploadFile = File(...)):
         "filename": pdf_file.filename,
         "pdf_path": str(pdf_path),
         "size_mb":  round(len(content)/1024/1024, 2),
+        "username": _get_username(request),
     }))
     return JSONResponse({"uid": uid, "redirect": f"/cbc/progress/{uid}"})
 
