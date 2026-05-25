@@ -201,7 +201,7 @@ def _shell(title, body, scripts="", request=None):
     nav_items.append(('📊 CBC', '/cbc/'))
     nav_items.append(('📋 My Jobs', '/coho/jobs'))
     if role == 'admin':
-        nav_items.append(('⚙ Admin', '/auth/admin/'))
+        nav_items.append(('⚙ Admin', '/auth/admin'))
 
     nav_html = '\n      '.join(
         f'<a href="{url}" class="nav-link">{label}</a>'

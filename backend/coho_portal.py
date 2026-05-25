@@ -7,7 +7,7 @@ import os, io, json, uuid, logging, threading
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile, Request
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 
@@ -115,7 +115,7 @@ def page(title, body, request=None):
         nav_items.append(('📊 CBC', '/cbc/'))
     nav_items.append(('📋 My Jobs', '/coho/jobs'))
     if role == 'admin':
-        nav_items.append(('⚙ Admin', '/auth/admin/'))
+        nav_items.append(('⚙ Admin', '/auth/admin'))
 
     nav_html = '\n    '.join(
         f'<a href="{url}" class="nav-link">{label}</a>'
@@ -833,8 +833,15 @@ def jobs_history(request: Request):
             status = "error"; counts["error"] += 1
             badge  = '<span style="color:#dc2626;font-weight:600">&#x2717; Error</span>'
         else:
-            status = "processing"; counts["processing"] += 1
-            badge  = '<span style="color:#d97706;font-weight:600">&#x23F3; Processing</span>'
+            # Mark as stale if older than 2 hours with no result
+            import time
+            age_hours = (time.time() - job["_mtime"]) / 3600
+            if age_hours > 2:
+                status = "error"; counts["error"] += 1
+                badge  = '<span style="color:#94a3b8;font-weight:600">&#x2715; Stale</span>'
+            else:
+                status = "processing"; counts["processing"] += 1
+                badge  = '<span style="color:#d97706;font-weight:600">&#x23F3; Processing</span>'
 
         # Summary
         summary = ""
