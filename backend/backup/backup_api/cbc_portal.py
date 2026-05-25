@@ -20,7 +20,16 @@ from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 
-# CBC API - Phase 2 (not active)
+try:
+    from cbc_api import enquire, cache_info, cache_delete, list_cache, CACHE_TTL
+    API_ENABLED = bool(__import__("os").getenv("CBC_API_URL",""))
+except ImportError:
+    API_ENABLED = False
+    def enquire(*a,**k): raise ValueError("cbc_api.py not found")
+    def cache_info(nid): return None
+    def cache_delete(nid): pass
+    def list_cache(): return []
+    CACHE_TTL = 30
 
 load_dotenv()
 log = logging.getLogger("cbc_portal")
@@ -241,9 +250,37 @@ def _fmt_amount(amount, currency="USD") -> str:
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
+
+def _get_username(request) -> str:
+    try:
+        import jwt as _jwt, os as _os
+        token = request.cookies.get("auth_token","")
+        if not token: return "unknown"
+        payload = _jwt.decode(token, _os.getenv("JWT_SECRET",""), algorithms=["HS256"])
+        return payload.get("sub","unknown")
+    except: return "unknown"
+
+def _get_role(request) -> str:
+    try:
+        import jwt as _jwt, os as _os
+        token = request.cookies.get("auth_token","")
+        if not token: return "viewer"
+        payload = _jwt.decode(token, _os.getenv("JWT_SECRET",""), algorithms=["HS256"])
+        return payload.get("role","viewer")
+    except: return "viewer"
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     body = """
+    <!-- Tab navigation -->
+    <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid var(--border)">
+      <a href="/cbc/" style="padding:10px 24px;font-size:13px;font-weight:600;
+         text-decoration:none;color:#1a5276;border-bottom:2px solid #1a5276;margin-bottom:-2px">
+        📄 PDF Upload</a>
+      <a href="/cbc/api" style="padding:10px 24px;font-size:13px;font-weight:500;
+         text-decoration:none;color:#64748b">
+        🔍 API Lookup</a>
+    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
       <div>
         <h1 style="font-size:20px;font-weight:700">CBC Report Extractor</h1>
@@ -917,6 +954,11 @@ def download_excel(uid: str):
     )
 
 
+@app.get("/api/extract")
+def api_status():
+    return {"status": "running", "service": "cbc-portal", "version": "1.0.0"}
+
+
 
 @app.get("/pdf/{uid}")
 def pdf_summary(uid: str):
@@ -1114,9 +1156,253 @@ def jobs_history(request: Request):
 
 
 
+@app.get("/api", response_class=HTMLResponse)
+def api_lookup_page(request: Request, msg: str = "", error: str = ""):
+    """CBC API lookup page with cache check."""
+    alert = ""
+    if msg:
+        alert = f'<div style="padding:12px 16px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;color:#065f46;margin-bottom:16px">{msg}</div>'
+    if error:
+        alert = f'<div style="padding:12px 16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;color:#991b1b;margin-bottom:16px">{error}</div>'
+
+    api_status = ('<span style="color:#059669;font-weight:600">&#x2713; Connected</span>' if API_ENABLED
+                  else '<span style="color:#dc2626">&#x2717; Not configured</span>')
+
+    body = f"""
+    <!-- Tab navigation -->
+    <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid var(--border)">
+      <a href="/cbc/" style="padding:10px 24px;font-size:13px;font-weight:500;
+         text-decoration:none;color:#64748b">
+        📄 PDF Upload</a>
+      <a href="/cbc/api" style="padding:10px 24px;font-size:13px;font-weight:600;
+         text-decoration:none;color:#1a5276;border-bottom:2px solid #1a5276;margin-bottom:-2px">
+        🔍 API Lookup</a>
+    </div>
+
+    {alert}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+      <!-- API Lookup Form -->
+      <div class="card">
+        <div class="card-title">CBC API Enquiry &nbsp; {api_status}</div>
+        <form method="POST" action="/cbc/api/enquire">
+          <div style="margin-bottom:14px">
+            <label style="display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:6px">
+              National ID (NID) *</label>
+            <input name="nid" required placeholder="e.g. 010001303"
+              style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+            <div>
+              <label style="display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:6px">
+                Amount *</label>
+              <input name="amount" required placeholder="e.g. 50000" type="number"
+                style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px">
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:6px">
+                Currency *</label>
+              <select name="currency"
+                style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px">
+                <option value="USD">USD</option>
+                <option value="KHR">KHR</option>
+              </select>
+            </div>
+          </div>
+          <div style="border-top:1px solid var(--border);padding-top:14px;margin-bottom:14px">
+            <div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:10px">
+              OPTIONAL DETAILS</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+              <div>
+                <label style="display:block;font-size:11px;color:#64748b;margin-bottom:4px">Family Name</label>
+                <input name="name_family" placeholder="e.g. LUN"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+              </div>
+              <div>
+                <label style="display:block;font-size:11px;color:#64748b;margin-bottom:4px">First Name</label>
+                <input name="name_first" placeholder="e.g. SOPHAL"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">
+              <div>
+                <label style="display:block;font-size:11px;color:#64748b;margin-bottom:4px">DOB Day</label>
+                <input name="dob_d" placeholder="DD" maxlength="2"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+              </div>
+              <div>
+                <label style="display:block;font-size:11px;color:#64748b;margin-bottom:4px">Month</label>
+                <input name="dob_m" placeholder="MM" maxlength="2"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+              </div>
+              <div>
+                <label style="display:block;font-size:11px;color:#64748b;margin-bottom:4px">Year</label>
+                <input name="dob_y" placeholder="YYYY" maxlength="4"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label style="display:block;font-size:11px;color:#64748b;margin-bottom:4px">Gender</label>
+                <select name="gender"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+                  <option value="M">Male</option>
+                  <option value="F">Female</option>
+                </select>
+              </div>
+              <div>
+                <label style="display:block;font-size:11px;color:#64748b;margin-bottom:4px">Product Type</label>
+                <select name="product_type"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+                  <option value="GRL">General Loan</option>
+                  <option value="MTG">Mortgage</option>
+                  <option value="CAR">Car Loan</option>
+                  <option value="CRC">Credit Card</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <button type="submit"
+            style="width:100%;padding:12px;background:#1a5276;color:#fff;border:none;
+                   border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">
+            🔍 Check CBC Report</button>
+        </form>
+      </div>
+
+      <!-- Cache panel -->
+      <div class="card">
+        <div class="card-title">Cached Enquiries ({CACHE_TTL}-day validity)</div>
+        <div style="font-size:12px;color:#64748b;margin-bottom:12px">
+          Recent enquiries — use cached results to avoid repeat charges.
+        </div>
+        <div id="cache-list" style="max-height:400px;overflow-y:auto">
+          Loading cache...
+        </div>
+      </div>
+    </div>
+
+    <script>
+    fetch('/cbc/api/cache-list')
+      .then(r => r.json())
+      .then(data => {{
+        const el = document.getElementById('cache-list');
+        if (!data.length) {{
+          el.innerHTML = '<p style="color:#94a3b8;font-size:13px">No cached enquiries yet.</p>';
+          return;
+        }}
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+        html += '<tr style="background:#d6eaf8"><th style="padding:8px;text-align:left">NID</th><th>Name</th><th>Cached</th><th>Expires</th><th></th></tr>';
+        data.forEach(item => {{
+          const expired = item.expired;
+          const color = expired ? '#dc2626' : '#059669';
+          const days = expired ? 'Expired' : item.days_left + 'd left';
+          html += `<tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:7px 8px;font-weight:600">${{item.nid}}</td>
+            <td style="padding:7px 8px;font-size:11px">${{item.name}}</td>
+            <td style="padding:7px 8px;font-size:11px;color:#64748b">${{item.cached_at}}</td>
+            <td style="padding:7px 8px"><span style="color:${{color}};font-size:11px">${{days}}</span></td>
+            <td style="padding:7px 8px">
+              <a href="/cbc/api/use/${{item.nid}}"
+                 style="font-size:11px;color:#2563eb;margin-right:6px">View</a>
+            </td>
+          </tr>`;
+        }});
+        html += '</table>';
+        el.innerHTML = html;
+      }});
+    </script>"""
+    return HTMLResponse(_shell("API Lookup", body, request=request))
 
 
+@app.post("/api/enquire")
+async def api_enquire(
+    request: Request,
+    nid:          str = Form(...),
+    amount:       str = Form(...),
+    currency:     str = Form("USD"),
+    name_family:  str = Form(""),
+    name_first:   str = Form(""),
+    dob_d:        str = Form(""),
+    dob_m:        str = Form(""),
+    dob_y:        str = Form(""),
+    gender:       str = Form("M"),
+    product_type: str = Form("GRL"),
+):
+    """Handle CBC API enquiry form submission."""
+    from fastapi.responses import RedirectResponse
+    username = _get_username(request)
+    nid = nid.strip()
 
+    # Check cache first
+    info = cache_info(nid)
+    if info and not info["expired"]:
+        return RedirectResponse(
+            f"/cbc/api/use/{nid}?msg=Using+cached+result+from+{info['cached_at']}+({info['days_left']}+days+left)",
+            status_code=302
+        )
+
+    # Call API
+    try:
+        result, from_cache = enquire(
+            nid=nid, amount=amount, currency=currency,
+            username=username, force=False,
+            name_family=name_family, name_first=name_first,
+            dob_d=dob_d, dob_m=dob_m, dob_y=dob_y,
+            gender=gender, product_type=product_type,
+        )
+        # Save as job
+        import uuid
+        uid = str(uuid.uuid4())[:8]
+        job_file = UPLOAD_DIR / (uid + "_job.json")
+        result_file = UPLOAD_DIR / (uid + "_result.json")
+        job_file.write_text(json.dumps({
+            "uid": uid, "filename": f"API:{nid}",
+            "size_mb": 0, "username": username,
+            "source": "api", "nid": nid,
+        }))
+        result_file.write_text(json.dumps(result, default=str))
+        return RedirectResponse(f"/cbc/result/{uid}", status_code=302)
+    except Exception as e:
+        return RedirectResponse(f"/cbc/api?error={str(e)[:100]}", status_code=302)
+
+
+@app.get("/api/use/{nid}", response_class=HTMLResponse)
+def api_use_cached(nid: str, request: Request, msg: str = ""):
+    """Load cached result and show it."""
+    from cbc_api import cache_get
+    import uuid
+    cached = cache_get(nid)
+    if not cached:
+        return RedirectResponse(f"/cbc/api?error=No+cached+result+for+NID+{nid}", status_code=302)
+
+    # Create a temporary job result
+    uid = str(uuid.uuid4())[:8]
+    result_file = UPLOAD_DIR / (uid + "_result.json")
+    job_file    = UPLOAD_DIR / (uid + "_job.json")
+    job_file.write_text(json.dumps({
+        "uid": uid, "filename": f"API:{nid} (cached)",
+        "size_mb": 0, "username": _get_username(request),
+        "source": "api_cache", "nid": nid,
+    }))
+    result_file.write_text(json.dumps(cached, default=str))
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"/cbc/result/{uid}", status_code=302)
+
+
+@app.get("/api/cache-list")
+def api_cache_list():
+    """Return cached enquiries as JSON for the UI."""
+    return JSONResponse(list_cache())
+
+
+@app.post("/api/cache-delete/{nid}")
+def api_cache_delete(nid: str, request: Request):
+    """Admin: force delete cache for NID."""
+    role = _get_role(request)
+    if role != "admin":
+        return JSONResponse({"error": "Admin only"}, status_code=403)
+    cache_delete(nid)
+    return JSONResponse({"deleted": nid})
 
 
 @app.get("/health")
