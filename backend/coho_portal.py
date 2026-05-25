@@ -803,8 +803,9 @@ def jobs_history(request: Request):
                 job["_dl_url"]    = dl_url
                 job["_retry_url"] = retry_url
                 job["_mtime"]     = jf.stat().st_mtime
-                # Filter by user unless admin
-                if current_role != "admin" and job.get("username","unknown") != current_user:
+                # Admin sees all; others see only their own jobs
+                job_user = job.get("username", "unknown")
+                if current_role != "admin" and job_user != current_user:
                     continue
                 all_jobs.append(job)
             except: pass
@@ -905,6 +906,7 @@ def jobs_history(request: Request):
       <div style="display:flex;gap:10px">
         <a href="/coho/" class="btn btn-primary">+ COHO Upload</a>
         <a href="/cbc/"  class="btn btn-ghost">+ CBC Upload</a>
+        {"<button onclick=\"if(confirm('Clear all failed/stale jobs?'))fetch('/coho/jobs/clear',{method:'POST'}).then(()=>location.reload())\" class=\"btn btn-ghost\" style=\"color:#dc2626\" >🗑 Clear Failed</button>" if current_role == "admin" else ""}
       </div>
     </div>
     <div class="card">
