@@ -90,41 +90,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .month-table tr:nth-child(even) td{background:#f8fafc}
 .month-table .total-row td{background:#fffde7;font-weight:700}
 """
-UPLOAD_JS = """
-<script>
-function selectFile(input) {
-  var file = input.files[0];
-  if (!file) return;
-  document.getElementById('fname').textContent = file.name;
-  document.getElementById('fsize').textContent = '(' + (file.size/1024/1024).toFixed(2) + ' MB)';
-  document.getElementById('info').style.display = 'block';
-}
-function uploadFile() {
-  var input = document.getElementById('inp');
-  if (!input.files[0]) return;
-  var form = new FormData();
-  form.append('pdf_file', input.files[0]);
-  fetch('/coho/extract', {method:'POST', body:form})
-    .then(function(r){ return r.json(); })
-    .then(function(d){ if(d.redirect) window.location.href = d.redirect; })
-    .catch(function(e){ alert('Upload failed: ' + e); });
-}
-var zone = document.getElementById('zone');
-if (zone) {
-  zone.addEventListener('dragover', function(e){ e.preventDefault(); zone.style.borderColor='#2563eb'; });
-  zone.addEventListener('dragleave', function(){ zone.style.borderColor=''; });
-  zone.addEventListener('drop', function(e){
-    e.preventDefault(); zone.style.borderColor='';
-    var f = e.dataTransfer.files[0];
-    if (f && f.name.endsWith('.pdf')) {
-      var dt = new DataTransfer(); dt.items.add(f);
-      var inp = document.getElementById('inp');
-      inp.files = dt.files; selectFile(inp);
-    }
-  });
-}
-</script>
-"""
 
 
 def _sym(currency):
@@ -181,136 +146,179 @@ def page(title, body, request=None):
   </div>
 </div>
 <div class="content">{body}</div>
-</body></html>""" + UPLOAD_JS
+</body></html>"""
 
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    role = _get_role(request)
+    body = """
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+      <div>
+        <h1 style="font-size:20px;font-weight:700">FI Statement Analyser</h1>
+        <p style="font-size:13px;color:var(--muted);margin-top:3px">
+          Upload a bank statement PDF &rarr; auto-extract all transactions &rarr; download filled Excel summary
+        </p>
+      </div>
+    </div>
 
-    trainer_link = ""
-    if role == "admin":
-        trainer_link = "<a href='/trainer/' style='color:#2563eb;text-decoration:none;font-size:11px'>Open Trainer &rarr;</a>"
+    <div class="step-indicator">
+      <div class="step active">
+        <div class="step-dot">1</div>
+        <div class="step-label">Upload PDF</div>
+        <div class="step-line"></div>
+      </div>
+      <div class="step">
+        <div class="step-dot">2</div>
+        <div class="step-label">Extract &amp; Review</div>
+        <div class="step-line"></div>
+      </div>
+      <div class="step">
+        <div class="step-dot">3</div>
+        <div class="step-label">Download Excel</div>
+      </div>
+    </div>
 
-    extracts = [
-        ("📅","Statement Period","From/To dates"),
-        ("👤","Account Holder","Name & account number"),
-        ("💱","Currency","USD or KHR auto-detected"),
-        ("📥","Money In","Total credits & count"),
-        ("📤","Money Out","Total debits & count"),
-        ("💰","Balance","Running balance per row"),
-        ("📊","Monthly Summary","In/out/avg per month"),
-        ("🔁","Reversals","Flagged reversed transactions"),
-        ("📋","All Transactions","Date, desc, amount, balance"),
-    ]
-    extract_html = ""
-    for ic, nm, desc in extracts:
-        extract_html += (
-            '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px;'
-            'background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">'
-            '<span style="font-size:18px;min-width:24px">' + ic + '</span>'
-            '<div><div style="font-size:12px;font-weight:700;color:#1F4E79">' + nm + '</div>'
-            '<div style="font-size:11px;color:#64748b">' + desc + '</div></div></div>'
-        )
+    <div class="card">
+      <div class="card-title">Upload Bank Statement PDF</div>
 
-    banks = [
-        ("ABA Bank","🏦","USD/KHR"), ("Wing Bank","🦅","USD/KHR"),
-        ("ACLEDA Bank","🏛","KHR"),  ("KB Prasac","💳","USD/KHR"),
-        ("Philip Bank","🏦","USD"),  ("AMRET MFI","🌾","USD"),
-        ("Woori Bank","🏢","USD"),   ("Hattha Bank","💰","USD/KHR"),
-        ("Canadia Bank","🏦","KHR"), ("Sathapana Bank","🏛","USD"),
-        ("Post Bank","📮","USD"),    ("Maybank","🏦","USD"),
-        ("AMK Microfinance","🌱","USD"), ("Taiwan Coop Bank","🏦","USD"),
-        ("LOLC Cambodia","🏦","USD"),
-    ]
-    bank_html = ""
-    for nm, ic, cy in banks:
-        bank_html += (
-            '<div style="display:flex;align-items:center;gap:6px;padding:6px 12px;'
-            'background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">'
-            + ic + ' ' + nm +
-            '<span style="color:#94a3b8;font-weight:400;margin-left:2px">' + cy + '</span>'
-            '</div>'
-        )
+      <div class="alert alert-info">
+        <span>&#x2139;</span>
+        <div>
+          Upload the bank statement PDF exported from your banking app or internet banking portal.
+          The system will auto-detect the bank, extract all transactions,
+          and generate a uniform Excel summary with monthly analytics.
+        </div>
+      </div>
 
-    body = (
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:18px">'
+      <div class="upload-zone" id="drop-zone" onclick="document.getElementById('pdf-input').click()">
+        <div class="upload-icon">&#128196;</div>
+        <div class="upload-title">Drop bank statement PDF here or click to browse</div>
+        <div class="upload-sub">15 supported banks &mdash; auto-detected &middot; Max 30MB</div>
+        <input type="file" id="pdf-input" accept=".pdf" style="display:none"
+               onchange="handleFileSelect(this)">
+      </div>
 
-        # Upload card
-        '<div class="card">'
-        '<div class="card-title">Upload FI Statement PDF</div>'
-        '<div class="upload-zone" id="zone" onclick="document.getElementById(\'inp\').click()">'
-        '<div style="font-size:32px;margin-bottom:8px">&#128196;</div>'
-        '<div style="font-size:15px;font-weight:600;margin-bottom:6px">Drop PDF here or click to browse</div>'
-        '<div style="font-size:12px;color:#64748b">15 supported banks &mdash; Max 30MB</div>'
-        '<input type="file" id="inp" accept=".pdf" style="display:none" onchange="selectFile(this)">'
-        '</div>'
-        '<div id="info" style="display:none;margin-top:12px">'
-        '<div style="display:flex;justify-content:space-between;align-items:center;'
-        'padding:10px;background:#f8fafc;border-radius:8px;margin-bottom:10px">'
-        '<span id="fname" style="font-weight:600;font-size:13px"></span>'
-        '<span id="fsize" style="color:#64748b;font-size:12px"></span>'
-        '</div>'
-        '<button class="btn btn-primary" style="width:100%;padding:12px;font-size:14px" '
-        'onclick="uploadFile()">&#x1F4E4; Extract Transactions</button>'
-        '</div>'
-        '</div>'
+      <div id="file-info" style="display:none;margin-top:12px">
+        <div class="alert alert-ok" id="file-name-display"></div>
+        <div class="progress"><div class="progress-bar" id="prog-bar"></div></div>
+      </div>
 
-        # What gets extracted
-        '<div class="card">'
-        '<div class="card-title">What Gets Extracted</div>'
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-        + extract_html +
-        '</div></div>'
+      <div style="margin-top:16px;display:flex;gap:10px">
+        <button type="button" class="btn btn-primary btn-lg" id="submit-btn"
+                disabled onclick="doUpload()">
+          Extract &amp; Generate Excel
+        </button>
+        <button type="button" class="btn btn-ghost" onclick="resetForm()">Clear</button>
+      </div>
+    </div>
 
-        '</div>'
+    <div class="card">
+      <div class="card-title">What gets extracted</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+        <div style="padding:14px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0">
+          <div style="font-size:20px;margin-bottom:8px">&#128196;</div>
+          <div style="font-weight:600;margin-bottom:4px;font-size:13px">Transaction History</div>
+          <div style="font-size:12px;color:var(--muted)">
+            All transactions with date, description, money in, money out,
+            and running balance — complete and unabridged
+          </div>
+        </div>
+        <div style="padding:14px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe">
+          <div style="font-size:20px;margin-bottom:8px">&#128200;</div>
+          <div style="font-weight:600;margin-bottom:4px;font-size:13px">Monthly Analytics</div>
+          <div style="font-size:12px;color:var(--muted)">
+            Month-by-month breakdown of total in, total out, average balance,
+            highest and lowest balance, and net cash flow
+          </div>
+        </div>
+        <div style="padding:14px;background:#fef3c7;border-radius:8px;border:1px solid #fcd34d">
+          <div style="font-size:20px;margin-bottom:8px">&#128203;</div>
+          <div style="font-weight:600;margin-bottom:4px;font-size:13px">Account Summary</div>
+          <div style="font-size:12px;color:var(--muted)">
+            Account holder, account number, statement period, opening and closing balance,
+            currency, and bank name
+          </div>
+        </div>
+      </div>
+    </div>
 
-        # Supported banks
-        '<div class="card">'
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
-        '<div class="card-title" style="margin:0">Supported Banks &amp; MFIs</div>'
-        '<span style="font-size:11px;color:#94a3b8">15 institutions &mdash; auto-detected, no setup needed</span>'
-        '</div>'
-        '<div style="display:flex;flex-wrap:wrap;gap:8px">' + bank_html + '</div>'
-        '<div style="margin-top:10px;font-size:11px;color:#94a3b8;display:flex;gap:12px;align-items:center">'
-        '<span>&#10003; KHR &amp; USD supported</span>'
-        '<span>&#10003; Multi-page PDFs</span>'
-        '<span>&#10003; Encrypted PDFs auto-handled</span>'
-        + trainer_link +
-        '</div>'
-        '</div>'
-    )
-    return HTMLResponse(page("Upload", body, request))
+    <div class="card">
+      <div class="card-title">15 Supported Banks &amp; MFIs</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127970; ABA Bank <span style="font-weight:400;color:#94a3b8">USD/KHR</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#129413; Wing Bank <span style="font-weight:400;color:#94a3b8">USD/KHR</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127963; ACLEDA Bank <span style="font-weight:400;color:#94a3b8">KHR</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#128179; KB Prasac <span style="font-weight:400;color:#94a3b8">USD/KHR</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127970; Philip Bank <span style="font-weight:400;color:#94a3b8">USD</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127807; AMRET MFI <span style="font-weight:400;color:#94a3b8">USD</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127970; Woori Bank <span style="font-weight:400;color:#94a3b8">USD</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#128176; Hattha Bank <span style="font-weight:400;color:#94a3b8">USD/KHR</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127970; Canadia Bank <span style="font-weight:400;color:#94a3b8">KHR</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127963; Sathapana Bank <span style="font-weight:400;color:#94a3b8">USD</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#128238; Post Bank <span style="font-weight:400;color:#94a3b8">USD</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127970; Maybank <span style="font-weight:400;color:#94a3b8">USD</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127809; AMK Microfinance <span style="font-weight:400;color:#94a3b8">USD</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127970; Taiwan Coop Bank <span style="font-weight:400;color:#94a3b8">USD</span></span>
+        <span style="padding:4px 12px;background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">&#127970; LOLC Cambodia <span style="font-weight:400;color:#94a3b8">USD</span></span>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#94a3b8">
+        &#10003; Auto-detected &nbsp;&middot;&nbsp; &#10003; KHR &amp; USD &nbsp;&middot;&nbsp;
+        &#10003; Multi-page PDFs &nbsp;&middot;&nbsp; &#10003; No setup required
+      </div>
+    </div>"""
 
+    scripts = """<script>
+const dropZone = document.getElementById('drop-zone');
+const input    = document.getElementById('pdf-input');
 
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault(); dropZone.classList.add('drag');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag');
+  if (e.dataTransfer.files.length) {
+    input.files = e.dataTransfer.files;
+    handleFileSelect(input);
+  }
+});
 
-def _get_username(request: Request) -> str:
-    """Get username from JWT cookie."""
-    try:
-        import jwt as _jwt
-        import os as _os
-        token = request.cookies.get("auth_token","")
-        if not token:
-            return "unknown"
-        secret = _os.getenv("JWT_SECRET","")
-        payload = _jwt.decode(token, secret, algorithms=["HS256"])
-        return payload.get("sub","unknown")
-    except:
-        return "unknown"
+function handleFileSelect(inp) {
+  const f = inp.files[0];
+  if (!f) return;
+  document.getElementById('file-info').style.display = 'block';
+  document.getElementById('file-name-display').innerHTML =
+    '&#10003; Selected: <strong>' + f.name + '</strong> (' +
+    (f.size/1024/1024).toFixed(2) + ' MB)';
+  document.getElementById('submit-btn').disabled = false;
+}
 
-def _get_role(request: Request) -> str:
-    """Get role from JWT cookie."""
-    try:
-        import jwt as _jwt
-        import os as _os
-        token = request.cookies.get("auth_token","")
-        if not token:
-            return "staff"
-        secret = _os.getenv("JWT_SECRET","")
-        payload = _jwt.decode(token, secret, algorithms=["HS256"])
-        return payload.get("role","staff")
-    except:
-        return "staff"
+function resetForm() {
+  document.getElementById('pdf-input').value = '';
+  document.getElementById('file-info').style.display = 'none';
+  document.getElementById('submit-btn').disabled = true;
+}
+
+function doUpload() {
+  const inp = document.getElementById('pdf-input');
+  if (!inp.files.length) return;
+  const btn = document.getElementById('submit-btn');
+  btn.textContent = 'Uploading...'; btn.disabled = true;
+  document.getElementById('prog-bar').style.width = '30%';
+  const fd = new FormData();
+  fd.append('pdf_file', inp.files[0]);
+  fetch('/coho/extract', {method:'POST', body:fd})
+    .then(r => r.json())
+    .then(d => {
+      if (d.redirect) { window.location.href = d.redirect; }
+      else { window.location.href = '/coho/'; }
+    })
+    .catch(e => { btn.textContent = 'Upload failed: ' + e; btn.disabled = false; });
+}
+</script>"""
+
+    return HTMLResponse(page("Upload", body + scripts, request))
+
 
 @app.post("/extract")
 async def extract(request: Request, pdf_file: UploadFile = File(...)):
@@ -325,7 +333,7 @@ async def extract(request: Request, pdf_file: UploadFile = File(...)):
         "size_mb": round(len(raw) / 1024 / 1024, 2),
         "username": _get_username(request),
     }))
-    return JSONResponse({"uid": uid})
+    return JSONResponse({"uid": uid, "redirect": f"/coho/progress/{uid}"})
 
 
 @app.get("/progress/{uid}", response_class=HTMLResponse)
@@ -982,7 +990,6 @@ def jobs_history(request: Request):
         <a href="/coho/" class="btn btn-primary">+ COHO Upload</a>
         <a href="/cbc/"  class="btn btn-ghost">+ CBC Upload</a>
         {_clear}
-        {"<button onclick=\"if(confirm('Clear all failed/stale jobs?'))fetch('/coho/jobs/clear',{method:'POST'}).then(()=>location.reload())\" class=\"btn btn-ghost\" style=\"color:#dc2626\" >🗑 Clear Failed</button>" if current_role == "admin" else ""}
       </div>
     </div>
     <div class="card">
