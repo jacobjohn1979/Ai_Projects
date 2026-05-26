@@ -32,7 +32,7 @@ USERS_FILE  = DATA_DIR / "users.json"
 AUDIT_FILE  = DATA_DIR / "audit.log"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Auth Service", redirect_slashes=False)
+app = FastAPI(title="Auth Service")
 
 # ── Role → allowed portals ────────────────────────────────────────────────────
 ROLE_ACCESS = {
@@ -345,23 +345,34 @@ def logout(request: Request):
 # ── TOKEN VALIDATION (called by other portals) ────────────────────────────────
 
 @app.get("/validate")
-def validate(request: Request, path: str = ""):
-    """Called by nginx auth_request to validate token."""
+def validate(request: Request, path: str = "/"):
+    """
+    Called by nginx auth_request to validate token.
+    Returns 200 with user info headers if valid, 401 if not.
+    """
     token = _get_token_from_request(request)
     if not token:
         return JSONResponse({"error": "no token"}, status_code=401)
+
     payload = _verify_token(token)
     if not payload:
         return JSONResponse({"error": "invalid token"}, status_code=401)
-    role = payload.get("role", "")
-    if role == "admin":
-        return JSONResponse({"username": payload.get("sub"), "role": role})
-    check_path = path or request.headers.get("X-Original-URI", "/")
-    allowed = ROLE_ACCESS.get(role, [])
-    if not any(check_path.startswith(p) for p in allowed):
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    return JSONResponse({"username": payload.get("sub"), "role": role})
 
+    role    = payload.get("role","")
+    allowed = ROLE_ACCESS.get(role, [])
+
+    # Check if this role can access the requested path
+    path_allowed = any(path.startswith(p) for p in allowed)
+    if not path_allowed:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    return JSONResponse({
+        "username": payload.get("sub"),
+        "role":     role,
+        "exp":      payload.get("exp"),
+    })
+
+# ── API: CHECK (for portals to call internally) ───────────────────────────────
 
 @app.get("/check")
 def check_auth(request: Request):
@@ -394,6 +405,7 @@ def admin_page(body, username="", active="users"):
         ("users",   "/auth/admin",         "👥 Users",     "Manage user accounts"),
         ("audit",   "/auth/admin/audit",   "📋 Audit Log", "View all activity"),
         ("modules", "/auth/admin/modules", "🔧 Modules",   "Module access overview"),
+        ("trainer", "/trainer/",           "🎓 Trainer",   "Bank format trainer"),
     ]
     nav_html = ""
     for key, href, label, _ in nav_items:
@@ -441,9 +453,11 @@ body.admin-body{{display:flex;flex-direction:column;background:#f8fafc;min-heigh
       <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.8px;
                   text-transform:uppercase;margin-bottom:12px;padding:0 4px">Portals</div>
       <a href="/coho/" style="display:block;padding:8px 16px;color:#94a3b8;
-         text-decoration:none;font-size:12px;border-radius:6px">📄 COHO Portal</a>
+         text-decoration:none;font-size:12px;border-radius:6px">📄 FI Statement Analyser</a>
       <a href="/cbc/"  style="display:block;padding:8px 16px;color:#94a3b8;
          text-decoration:none;font-size:12px;border-radius:6px">📊 CBC Portal</a>
+      <a href="/trainer/" style="display:block;padding:8px 16px;color:#94a3b8;
+         text-decoration:none;font-size:12px;border-radius:6px">🎓 Bank Trainer</a>
     </div>
   </div>
   <div class="main-content">{body}</div>

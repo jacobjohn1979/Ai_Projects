@@ -197,7 +197,7 @@ def _shell(title, body, scripts="", request=None):
 
     nav_items = []
     if role in ('admin','credit_officer','coho_manager','viewer'):
-        nav_items.append(('📄 COHO', '/coho/'))
+        nav_items.append(('📄 FI Statement', '/coho/'))
     nav_items.append(('📊 CBC', '/cbc/'))
     nav_items.append(('📋 My Jobs', '/coho/jobs'))
     if role == 'admin':

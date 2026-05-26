@@ -1,6 +1,6 @@
 """
-coho_portal.py — Credit Assessment Tools — COHO
-Upload PDF → extract transactions → download COHO Excel template
+coho_portal.py — Credit Assessment Tools — FI Statement Analyser
+Upload PDF → extract transactions → download FI Statement Excel
 Port: 8008  Access: /coho/
 """
 import os, io, json, uuid, logging, threading
@@ -17,7 +17,7 @@ BASE_DIR   = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 UPLOAD_DIR = BASE_DIR / "coho"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="COHO Portal")
+app = FastAPI(title="FI Statement Analyser")
 
 CSS = """
 :root{--nav:#1a2744;--accent:#2563eb;--ok:#059669;--ok-bg:#ecfdf5;
@@ -110,7 +110,7 @@ def page(title, body, request=None):
         except: pass
 
     # Build nav based on role
-    nav_items = [('📄 COHO', '/coho/')]
+    nav_items = [('📄 FI Statement', '/coho/')]
     if role in ('admin','credit_officer','cbc_manager','viewer'):
         nav_items.append(('📊 CBC', '/cbc/'))
     nav_items.append(('📋 My Jobs', '/coho/jobs'))
@@ -129,14 +129,14 @@ def page(title, body, request=None):
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Credit Assessment Tools - {title}</title>
+<title>Credit Assessment Tools - FI Statement Analyser - {title}</title>
 <style>{CSS}</style></head>
 <body>
 <div class="topbar">
   <div class="brand">
-    <div class="brand-icon">COHO</div>
+    <div class="brand-icon">FIS</div>
     <div><div class="brand-title">Credit Assessment Tools</div>
-         <div class="brand-sub">COHO &#8212; Bank Statement Analyser</div></div>
+         <div class="brand-sub">FI Statement Analyser</div></div>
   </div>
   <div class="nav-links">
     {role_pill}
@@ -209,6 +209,78 @@ def home(request: Request):
         });
     }
     </script>"""
+    body += '''
+    <!-- Supported Banks -->
+    <div class="card" style="margin-top:18px">
+      <div class="card-title">Supported Financial Institutions</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:4px">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🏦</span>
+          <div><div style="font-weight:600;color:#1F4E79">ABA Bank</div>
+          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🦅</span>
+          <div><div style="font-weight:600;color:#1F4E79">Wing Bank</div>
+          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🏛</span>
+          <div><div style="font-weight:600;color:#1F4E79">ACLEDA Bank</div>
+          <div style="color:#94a3b8;font-size:10px">KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">💳</span>
+          <div><div style="font-weight:600;color:#1F4E79">KB Prasac</div>
+          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🏦</span>
+          <div><div style="font-weight:600;color:#1F4E79">Philip Bank</div>
+          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🌾</span>
+          <div><div style="font-weight:600;color:#1F4E79">AMRET MFI</div>
+          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🏢</span>
+          <div><div style="font-weight:600;color:#1F4E79">Woori Bank</div>
+          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">💰</span>
+          <div><div style="font-weight:600;color:#1F4E79">Hattha Bank</div>
+          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🏦</span>
+          <div><div style="font-weight:600;color:#1F4E79">Canadia Bank</div>
+          <div style="color:#94a3b8;font-size:10px">KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🏛</span>
+          <div><div style="font-weight:600;color:#1F4E79">Sathapana Bank</div>
+          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">📮</span>
+          <div><div style="font-weight:600;color:#1F4E79">Post Bank</div>
+          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🏦</span>
+          <div><div style="font-weight:600;color:#1F4E79">Maybank</div>
+          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🌱</span>
+          <div><div style="font-weight:600;color:#1F4E79">AMK Microfinance</div>
+          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🏦</span>
+          <div><div style="font-weight:600;color:#1F4E79">Taiwan Coop Bank</div>
+          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
+          <span style="font-size:16px">🏦</span>
+          <div><div style="font-weight:600;color:#1F4E79">LOLC Cambodia</div>
+          <div style="color:#94a3b8;font-size:10px">USD</div></div></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#94a3b8">
+        ✓ Auto-detected — no configuration needed &nbsp;|&nbsp;
+        New banks can be added via the Bank Trainer
+      </div>
+    </div>'''
     return HTMLResponse(page("Upload", body, request))
 
 
@@ -661,7 +733,7 @@ def pdf_summary(uid: str):
 
     period = str(header.get("period_from",""))[:10] + " to " + str(header.get("period_to",""))[:10]
 
-    story.append(Paragraph("CREDIT ASSESSMENT TOOLS — COHO SUMMARY", title_style))
+    story.append(Paragraph("CREDIT ASSESSMENT TOOLS — FI STATEMENT SUMMARY", title_style))
     story.append(Paragraph(f"Period: {period}", sub_style))
     story.append(Spacer(1, 0.3*cm))
 
