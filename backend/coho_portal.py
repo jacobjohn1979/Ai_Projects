@@ -256,12 +256,7 @@ async def extract(request: Request, pdf_file: UploadFile = File(...)):
         "size_mb": round(len(raw) / 1024 / 1024, 2),
         "username": _get_username(request),
     }))
-    return JSONResponse(
-          </tbody>
-        </table>
-      </div>
-    </div>"""
-    return HTMLResponse(page("My Jobs", body, request))
+    return JSONResponse({"uid": uid, "redirect": f"/coho/progress/{uid}"})
 
 
 @app.post("/jobs/clear")
