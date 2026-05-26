@@ -884,6 +884,9 @@ def jobs_history(request: Request):
     all_jobs.sort(key=lambda j: j["_mtime"], reverse=True)
 
     counts = {"done":0, "error":0, "processing":0}
+    _clear = ('<button onclick="fetch(\'/coho/jobs/clear\',{method:\'POST\'}).then(()=>location.reload())"'
+              ' class="btn btn-ghost" style="color:#dc2626">&#x1F5D1; Clear Failed</button>'
+              ) if current_role == "admin" else ""
     _clear = ""
     if current_role == "admin":
         _clear = ('<button onclick="fetch(\'/coho/jobs/clear\',{method:\'POST\'}).then(()=>location.reload())"'
@@ -982,7 +985,7 @@ def jobs_history(request: Request):
         <a href="/coho/" class="btn btn-primary">+ COHO Upload</a>
         <a href="/cbc/"  class="btn btn-ghost">+ CBC Upload</a>
         {_clear}
-        {"<button onclick=\"if(confirm('Clear all failed/stale jobs?'))fetch('/coho/jobs/clear',{method:'POST'}).then(()=>location.reload())\" class=\"btn btn-ghost\" style=\"color:#dc2626\" >🗑 Clear Failed</button>" if current_role == "admin" else ""}
+        {_clear}
       </div>
     </div>
     <div class="card">
