@@ -32,7 +32,7 @@ USERS_FILE  = DATA_DIR / "users.json"
 AUDIT_FILE  = DATA_DIR / "audit.log"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Auth Service")
+app = FastAPI(title="Auth Service", redirect_slashes=False)
 
 # ── Role → allowed portals ────────────────────────────────────────────────────
 ROLE_ACCESS = {
