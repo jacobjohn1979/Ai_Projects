@@ -90,6 +90,42 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .month-table tr:nth-child(even) td{background:#f8fafc}
 .month-table .total-row td{background:#fffde7;font-weight:700}
 """
+UPLOAD_JS = """
+<script>
+function selectFile(input) {
+  var file = input.files[0];
+  if (!file) return;
+  document.getElementById('fname').textContent = file.name;
+  document.getElementById('fsize').textContent = '(' + (file.size/1024/1024).toFixed(2) + ' MB)';
+  document.getElementById('info').style.display = 'block';
+}
+function uploadFile() {
+  var input = document.getElementById('inp');
+  if (!input.files[0]) return;
+  var form = new FormData();
+  form.append('pdf_file', input.files[0]);
+  fetch('/coho/extract', {method:'POST', body:form})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(d.redirect) window.location.href = d.redirect; })
+    .catch(function(e){ alert('Upload failed: ' + e); });
+}
+var zone = document.getElementById('zone');
+if (zone) {
+  zone.addEventListener('dragover', function(e){ e.preventDefault(); zone.style.borderColor='#2563eb'; });
+  zone.addEventListener('dragleave', function(){ zone.style.borderColor=''; });
+  zone.addEventListener('drop', function(e){
+    e.preventDefault(); zone.style.borderColor='';
+    var f = e.dataTransfer.files[0];
+    if (f && f.name.endsWith('.pdf')) {
+      var dt = new DataTransfer(); dt.items.add(f);
+      var inp = document.getElementById('inp');
+      inp.files = dt.files; selectFile(inp);
+    }
+  });
+}
+</script>
+"""
+
 
 def _sym(currency):
     """Return currency symbol and formatter based on currency code."""
@@ -145,142 +181,105 @@ def page(title, body, request=None):
   </div>
 </div>
 <div class="content">{body}</div>
-</body></html>"""
+</body></html>""" + UPLOAD_JS
 
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    body = """
-    <h1 style="font-size:20px;font-weight:700;margin-bottom:20px">Bank Statement Analyser</h1>
-    <div class="card">
-      <div class="card-title">Upload COHO — Bank Statement Analyser</div>
-      <div class="upload-zone" id="zone" onclick="document.getElementById('inp').click()">
-        <div style="font-size:32px;margin-bottom:10px">&#128196;</div>
-        <div style="font-size:16px;font-weight:600;margin-bottom:6px">Drop PDF here or click to browse</div>
-        <div style="font-size:13px;color:#64748b">ABA Bank and other Cambodian banks - Max 30MB</div>
-        <input type="file" id="inp" accept=".pdf" style="display:none" onchange="selectFile(this)">
-      </div>
-      <div id="info" style="display:none;margin-top:12px">
-        <div class="alert-ok" id="fname"></div>
-        <div class="progress"><div class="progress-bar" id="pbar"></div></div>
-      </div>
-      <div style="margin-top:16px;display:flex;gap:10px">
-        <button id="btn" class="btn btn-primary btn-lg" disabled onclick="doUpload()">
-          Extract and Generate Excel
-        </button>
-        <button class="btn btn-ghost" onclick="clearForm()">Clear</button>
-      </div>
-    </div>
-    <script>
-    function selectFile(inp) {
-      var f = inp.files[0];
-      if (!f) return;
-      document.getElementById('info').style.display = 'block';
-      document.getElementById('fname').textContent = 'Selected: ' + f.name + ' (' + (f.size/1024/1024).toFixed(2) + ' MB)';
-      document.getElementById('btn').disabled = false;
-    }
-    function clearForm() {
-      document.getElementById('inp').value = '';
-      document.getElementById('info').style.display = 'none';
-      document.getElementById('btn').disabled = true;
-    }
-    function doUpload() {
-      var inp = document.getElementById('inp');
-      if (!inp.files.length) return;
-      var btn = document.getElementById('btn');
-      btn.textContent = 'Uploading...';
-      btn.disabled = true;
-      document.getElementById('pbar').style.width = '40%';
-      var fd = new FormData();
-      fd.append('pdf_file', inp.files[0]);
-      fetch('/coho/extract', {method: 'POST', body: fd})
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-          if (d.uid) {
-            window.location.href = '/coho/progress/' + d.uid;
-          } else {
-            btn.textContent = 'Error: ' + (d.error || 'unknown');
-            btn.disabled = false;
-          }
-        })
-        .catch(function(e) {
-          btn.textContent = 'Failed: ' + e;
-          btn.disabled = false;
-        });
-    }
-    </script>"""
-    body += '''
-    <!-- Supported Banks -->
-    <div class="card" style="margin-top:18px">
-      <div class="card-title">Supported Financial Institutions</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:4px">
-        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">ABA Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🦅</span>
-          <div><div style="font-weight:600;color:#1F4E79">Wing Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏛</span>
-          <div><div style="font-weight:600;color:#1F4E79">ACLEDA Bank</div>
-          <div style="color:#94a3b8;font-size:10px">KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">💳</span>
-          <div><div style="font-weight:600;color:#1F4E79">KB Prasac</div>
-          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">Philip Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🌾</span>
-          <div><div style="font-weight:600;color:#1F4E79">AMRET MFI</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏢</span>
-          <div><div style="font-weight:600;color:#1F4E79">Woori Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">💰</span>
-          <div><div style="font-weight:600;color:#1F4E79">Hattha Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">Canadia Bank</div>
-          <div style="color:#94a3b8;font-size:10px">KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏛</span>
-          <div><div style="font-weight:600;color:#1F4E79">Sathapana Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">📮</span>
-          <div><div style="font-weight:600;color:#1F4E79">Post Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">Maybank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🌱</span>
-          <div><div style="font-weight:600;color:#1F4E79">AMK Microfinance</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">Taiwan Coop Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">LOLC Cambodia</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div>
-      </div>
-      <div style="margin-top:10px;font-size:11px;color:#94a3b8">
-        ✓ Auto-detected — no configuration needed &nbsp;|&nbsp;
-        New banks can be added via the Bank Trainer
-      </div>
-    </div>'''
+    role = _get_role(request)
+
+    trainer_link = ""
+    if role == "admin":
+        trainer_link = "<a href='/trainer/' style='color:#2563eb;text-decoration:none;font-size:11px'>Open Trainer &rarr;</a>"
+
+    extracts = [
+        ("📅","Statement Period","From/To dates"),
+        ("👤","Account Holder","Name & account number"),
+        ("💱","Currency","USD or KHR auto-detected"),
+        ("📥","Money In","Total credits & count"),
+        ("📤","Money Out","Total debits & count"),
+        ("💰","Balance","Running balance per row"),
+        ("📊","Monthly Summary","In/out/avg per month"),
+        ("🔁","Reversals","Flagged reversed transactions"),
+        ("📋","All Transactions","Date, desc, amount, balance"),
+    ]
+    extract_html = ""
+    for ic, nm, desc in extracts:
+        extract_html += (
+            '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px;'
+            'background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">'
+            '<span style="font-size:18px;min-width:24px">' + ic + '</span>'
+            '<div><div style="font-size:12px;font-weight:700;color:#1F4E79">' + nm + '</div>'
+            '<div style="font-size:11px;color:#64748b">' + desc + '</div></div></div>'
+        )
+
+    banks = [
+        ("ABA Bank","🏦","USD/KHR"), ("Wing Bank","🦅","USD/KHR"),
+        ("ACLEDA Bank","🏛","KHR"),  ("KB Prasac","💳","USD/KHR"),
+        ("Philip Bank","🏦","USD"),  ("AMRET MFI","🌾","USD"),
+        ("Woori Bank","🏢","USD"),   ("Hattha Bank","💰","USD/KHR"),
+        ("Canadia Bank","🏦","KHR"), ("Sathapana Bank","🏛","USD"),
+        ("Post Bank","📮","USD"),    ("Maybank","🏦","USD"),
+        ("AMK Microfinance","🌱","USD"), ("Taiwan Coop Bank","🏦","USD"),
+        ("LOLC Cambodia","🏦","USD"),
+    ]
+    bank_html = ""
+    for nm, ic, cy in banks:
+        bank_html += (
+            '<div style="display:flex;align-items:center;gap:6px;padding:6px 12px;'
+            'background:#EAF2F8;border-radius:20px;font-size:11px;font-weight:600;color:#1F4E79">'
+            + ic + ' ' + nm +
+            '<span style="color:#94a3b8;font-weight:400;margin-left:2px">' + cy + '</span>'
+            '</div>'
+        )
+
+    body = (
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:18px">'
+
+        # Upload card
+        '<div class="card">'
+        '<div class="card-title">Upload FI Statement PDF</div>'
+        '<div class="upload-zone" id="zone" onclick="document.getElementById(\'inp\').click()">'
+        '<div style="font-size:32px;margin-bottom:8px">&#128196;</div>'
+        '<div style="font-size:15px;font-weight:600;margin-bottom:6px">Drop PDF here or click to browse</div>'
+        '<div style="font-size:12px;color:#64748b">15 supported banks &mdash; Max 30MB</div>'
+        '<input type="file" id="inp" accept=".pdf" style="display:none" onchange="selectFile(this)">'
+        '</div>'
+        '<div id="info" style="display:none;margin-top:12px">'
+        '<div style="display:flex;justify-content:space-between;align-items:center;'
+        'padding:10px;background:#f8fafc;border-radius:8px;margin-bottom:10px">'
+        '<span id="fname" style="font-weight:600;font-size:13px"></span>'
+        '<span id="fsize" style="color:#64748b;font-size:12px"></span>'
+        '</div>'
+        '<button class="btn btn-primary" style="width:100%;padding:12px;font-size:14px" '
+        'onclick="uploadFile()">&#x1F4E4; Extract Transactions</button>'
+        '</div>'
+        '</div>'
+
+        # What gets extracted
+        '<div class="card">'
+        '<div class="card-title">What Gets Extracted</div>'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+        + extract_html +
+        '</div></div>'
+
+        '</div>'
+
+        # Supported banks
+        '<div class="card">'
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+        '<div class="card-title" style="margin:0">Supported Banks &amp; MFIs</div>'
+        '<span style="font-size:11px;color:#94a3b8">15 institutions &mdash; auto-detected, no setup needed</span>'
+        '</div>'
+        '<div style="display:flex;flex-wrap:wrap;gap:8px">' + bank_html + '</div>'
+        '<div style="margin-top:10px;font-size:11px;color:#94a3b8;display:flex;gap:12px;align-items:center">'
+        '<span>&#10003; KHR &amp; USD supported</span>'
+        '<span>&#10003; Multi-page PDFs</span>'
+        '<span>&#10003; Encrypted PDFs auto-handled</span>'
+        + trainer_link +
+        '</div>'
+        '</div>'
+    )
     return HTMLResponse(page("Upload", body, request))
 
 
@@ -885,6 +884,10 @@ def jobs_history(request: Request):
     all_jobs.sort(key=lambda j: j["_mtime"], reverse=True)
 
     counts = {"done":0, "error":0, "processing":0}
+    _clear = ""
+    if current_role == "admin":
+        _clear = ('<button onclick="fetch(\'/coho/jobs/clear\',{method:\'POST\'}).then(()=>location.reload())"'
+                  ' class="btn btn-ghost" style="color:#dc2626">&#x1F5D1; Clear Failed</button>')
     rows = ""
 
     for job in all_jobs[:200]:
@@ -978,6 +981,7 @@ def jobs_history(request: Request):
       <div style="display:flex;gap:10px">
         <a href="/coho/" class="btn btn-primary">+ COHO Upload</a>
         <a href="/cbc/"  class="btn btn-ghost">+ CBC Upload</a>
+        {_clear}
         {"<button onclick=\"if(confirm('Clear all failed/stale jobs?'))fetch('/coho/jobs/clear',{method:'POST'}).then(()=>location.reload())\" class=\"btn btn-ghost\" style=\"color:#dc2626\" >🗑 Clear Failed</button>" if current_role == "admin" else ""}
       </div>
     </div>
