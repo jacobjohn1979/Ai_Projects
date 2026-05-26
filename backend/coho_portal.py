@@ -171,6 +171,8 @@ def page(title, body, request=None):
 
 
 
+
+
 def _get_username(request) -> str:
     try:
         import jwt as _jwt, os as _os
@@ -188,6 +190,7 @@ def _get_role(request) -> str:
         payload = _jwt.decode(token, _os.getenv("JWT_SECRET",""), algorithms=["HS256"])
         return payload.get("role","viewer")
     except: return "viewer"
+
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
