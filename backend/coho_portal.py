@@ -209,78 +209,8 @@ def home(request: Request):
         });
     }
     </script>"""
-    body += '''
-    <!-- Supported Banks -->
-    <div class="card" style="margin-top:18px">
-      <div class="card-title">Supported Financial Institutions</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:4px">
-        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">ABA Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🦅</span>
-          <div><div style="font-weight:600;color:#1F4E79">Wing Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏛</span>
-          <div><div style="font-weight:600;color:#1F4E79">ACLEDA Bank</div>
-          <div style="color:#94a3b8;font-size:10px">KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">💳</span>
-          <div><div style="font-weight:600;color:#1F4E79">KB Prasac</div>
-          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">Philip Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🌾</span>
-          <div><div style="font-weight:600;color:#1F4E79">AMRET MFI</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏢</span>
-          <div><div style="font-weight:600;color:#1F4E79">Woori Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">💰</span>
-          <div><div style="font-weight:600;color:#1F4E79">Hattha Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD • KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">Canadia Bank</div>
-          <div style="color:#94a3b8;font-size:10px">KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏛</span>
-          <div><div style="font-weight:600;color:#1F4E79">Sathapana Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">📮</span>
-          <div><div style="font-weight:600;color:#1F4E79">Post Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">Maybank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🌱</span>
-          <div><div style="font-weight:600;color:#1F4E79">AMK Microfinance</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">Taiwan Coop Bank</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
-          background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px">
-          <span style="font-size:16px">🏦</span>
-          <div><div style="font-weight:600;color:#1F4E79">LOLC Cambodia</div>
-          <div style="color:#94a3b8;font-size:10px">USD</div></div></div>
-      </div>
-      <div style="margin-top:10px;font-size:11px;color:#94a3b8">
-        ✓ Auto-detected — no configuration needed &nbsp;|&nbsp;
-        New banks can be added via the Bank Trainer
-      </div>
-    </div>'''
+    banks_html = '<div class="card" style="margin-top:18px"><div class="card-title">Supported Financial Institutions</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:4px"><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🏦</span><div><div style="font-weight:600;color:#1F4E79">ABA Bank</div><div style="color:#94a3b8;font-size:10px">USD / KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🦅</span><div><div style="font-weight:600;color:#1F4E79">Wing Bank</div><div style="color:#94a3b8;font-size:10px">USD / KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🏛</span><div><div style="font-weight:600;color:#1F4E79">ACLEDA Bank</div><div style="color:#94a3b8;font-size:10px">KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">💳</span><div><div style="font-weight:600;color:#1F4E79">KB Prasac</div><div style="color:#94a3b8;font-size:10px">USD / KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🏦</span><div><div style="font-weight:600;color:#1F4E79">Philip Bank</div><div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🌾</span><div><div style="font-weight:600;color:#1F4E79">AMRET MFI</div><div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🏢</span><div><div style="font-weight:600;color:#1F4E79">Woori Bank</div><div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">💰</span><div><div style="font-weight:600;color:#1F4E79">Hattha Bank</div><div style="color:#94a3b8;font-size:10px">USD / KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🏦</span><div><div style="font-weight:600;color:#1F4E79">Canadia Bank</div><div style="color:#94a3b8;font-size:10px">KHR</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🏛</span><div><div style="font-weight:600;color:#1F4E79">Sathapana Bank</div><div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">📮</span><div><div style="font-weight:600;color:#1F4E79">Post Bank</div><div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🏦</span><div><div style="font-weight:600;color:#1F4E79">Maybank</div><div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🌱</span><div><div style="font-weight:600;color:#1F4E79">AMK Microfinance</div><div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🏦</span><div><div style="font-weight:600;color:#1F4E79">Taiwan Coop Bank</div><div style="color:#94a3b8;font-size:10px">USD</div></div></div><div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"><span style="font-size:16px">🏦</span><div><div style="font-weight:600;color:#1F4E79">LOLC Cambodia</div><div style="color:#94a3b8;font-size:10px">USD</div></div></div></div><div style="margin-top:10px;font-size:11px;color:#94a3b8">Auto-detected - no configuration needed | New banks via Bank Trainer</div></div>'
+    body += banks_html
     return HTMLResponse(page("Upload", body, request))
 
 
